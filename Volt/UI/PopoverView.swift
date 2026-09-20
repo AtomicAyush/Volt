@@ -29,7 +29,10 @@ struct PopoverView: View {
         ScrollView {
             VStack(spacing: 12) {
                 StatusCard(snapshot: battery.snapshot)
-                InfoCard(snapshot: battery.snapshot)
+                HealthCard(snapshot: battery.snapshot)
+                TemperatureCard(snapshot: battery.snapshot)
+                PowerCard(snapshot: battery.snapshot)
+                CapacityCard(snapshot: battery.snapshot)
 
                 if prefs.trackDeviceBatteries {
                     DevicesCard(devices: devices.devices)
@@ -147,7 +150,9 @@ struct StatusCard: View {
 
 // MARK: - Battery information
 
-struct InfoCard: View {
+/// Health, temperature, power and capacity each get their own panel rather than
+/// sitting as divided sub-sections inside one "Battery Information" container.
+struct HealthCard: View {
     let snapshot: BatterySnapshot
 
     /// Apple's own "Maximum Capacity" when macOS has reported it, otherwise the
@@ -156,7 +161,7 @@ struct InfoCard: View {
         snapshot.appleMaxCapacity ?? snapshot.healthPercent.map { Int($0.rounded()) }
     }
 
-    private var healthGrade: (String, Color, String) {
+    private var grade: (String, Color, String) {
         switch health ?? 100 {
         case 90...: return ("Excellent", Panel.green, "Nothing to do — this battery is in great shape.")
         case 80..<90: return ("Good", Panel.green, "Apple considers a battery healthy down to 80%.")
@@ -165,7 +170,54 @@ struct InfoCard: View {
         }
     }
 
-    private var temperatureGrade: (String, Color, String) {
+    var body: some View {
+        let (label, tint, advice) = grade
+        Card {
+            SectionHeader(symbol: (health ?? 100) >= 80 ? "checkmark.circle.fill"
+                                                        : "exclamationmark.triangle.fill",
+                          tint: tint, title: "Battery Health")
+                .sectionDivider()
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(health.map { "\($0)%" } ?? "—")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(tint)
+                    Text(label)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tint)
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("\(grouped(snapshot.cycleCount))/1000")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Panel.label)
+                        Text("Cycle Count")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Panel.secondary)
+                    }
+                }
+
+                MeterBar(fraction: Double(health ?? 0) / 100, tint: tint)
+
+                Text(snapshot.condition.map {
+                    $0.lowercased() == "normal" ? advice : "macOS reports: \($0)"
+                } ?? advice)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Panel.secondary)
+            }
+            .padding(14)
+        }
+    }
+}
+
+struct TemperatureCard: View {
+    let snapshot: BatterySnapshot
+
+    private var grade: (String, Color, String) {
         switch snapshot.temperatureC {
         case ..<35: return ("Normal", Panel.green, "Optimal performance")
         case 35..<40: return ("Warm", Panel.amber, "Still within range")
@@ -174,74 +226,10 @@ struct InfoCard: View {
     }
 
     var body: some View {
+        let (label, tint, detail) = grade
         Card {
-            SectionHeader(symbol: "info.circle.fill", tint: Panel.blue,
-                          title: "Battery Information")
+            SectionHeader(symbol: "thermometer.medium", tint: tint, title: "Temperature")
                 .sectionDivider()
-
-            healthSection.padding(14).sectionDivider()
-            temperatureSection.padding(14).sectionDivider()
-            powerSection.padding(14).sectionDivider()
-            capacitySection.padding(14)
-        }
-    }
-
-    private var healthSection: some View {
-        let (grade, tint, advice) = healthGrade
-        return VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Image(systemName: (health ?? 100) >= 80 ? "checkmark.circle.fill"
-                                                        : "exclamationmark.triangle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(tint)
-                Text("Battery Health")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Panel.label)
-                Spacer()
-            }
-
-            HStack(alignment: .firstTextBaseline) {
-                Text(health.map { "\($0)%" } ?? "—")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(tint)
-                Text(grade)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(tint)
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text("\(grouped(snapshot.cycleCount))/1000")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Panel.label)
-                    Text("Cycle Count")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Panel.secondary)
-                }
-            }
-
-            MeterBar(fraction: Double(health ?? 0) / 100, tint: tint)
-
-            Text(snapshot.condition.map { $0.lowercased() == "normal" ? advice : "macOS reports: \($0)" } ?? advice)
-                .font(.system(size: 10.5))
-                .foregroundStyle(Panel.secondary)
-        }
-    }
-
-    private var temperatureSection: some View {
-        let (grade, tint, detail) = temperatureGrade
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "thermometer.medium")
-                    .font(.system(size: 14))
-                    .foregroundStyle(tint)
-                Text("Temperature")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Panel.label)
-                Spacer()
-            }
 
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -259,9 +247,8 @@ struct InfoCard: View {
 
                 VStack(alignment: .trailing, spacing: 1) {
                     HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 11))
-                        Text(grade).font(.system(size: 12.5, weight: .semibold))
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 11))
+                        Text(label).font(.system(size: 12.5, weight: .semibold))
                     }
                     .foregroundStyle(tint)
                     Text(detail)
@@ -270,82 +257,85 @@ struct InfoCard: View {
                 }
                 .padding(.top, 3)
             }
-        }
-    }
-
-    private var powerSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "bolt.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Panel.amber)
-                Text("Power & Electrical")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Panel.label)
-                Spacer()
-            }
-
-            HStack(alignment: .top) {
-                StatBlock(label: "Power Usage",
-                          value: String(format: "%.1f", abs(snapshot.watts)), unit: "W")
-                StatBlock(label: "Voltage",
-                          value: String(format: "%.2f", snapshot.voltage), unit: "V",
-                          alignment: .trailing)
-            }
-
-            HStack(alignment: .top) {
-                StatBlock(label: "Current",
-                          value: "\(abs(Int(snapshot.amperage * 1000)))", unit: "mA")
-
-                VStack(alignment: .trailing, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Image(systemName: snapshot.isCharging ? "arrow.up.circle.fill"
-                                                              : "arrow.down.circle.fill")
-                            .font(.system(size: 11))
-                        Text(snapshot.isCharging ? "Charging"
-                                                 : (snapshot.isPluggedIn ? "Holding" : "Discharging"))
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundStyle(snapshot.isCharging ? Panel.green : Panel.amber)
-
-                    if let watts = snapshot.adapterWatts, snapshot.isPluggedIn {
-                        Text("\(watts)W adapter")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Panel.secondary)
-                    } else {
-                        Text("Normal voltage")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Panel.green)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.top, 10)
-            }
-        }
-    }
-
-    private var capacitySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: "battery.100percent")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Panel.blue)
-                Text("Capacity Details")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Panel.label)
-                Spacer()
-            }
-            .padding(.bottom, 2)
-
-            ValueRow(label: "Remaining", value: grouped(snapshot.rawCurrentCapacity),
-                     unit: "mAh", tint: Panel.green)
-            ValueRow(label: "Current Full", value: grouped(snapshot.rawMaxCapacity),
-                     unit: "mAh", tint: Panel.blue)
-            ValueRow(label: "Design Capacity", value: grouped(snapshot.designCapacity),
-                     unit: "mAh", tint: Panel.secondary)
+            .padding(14)
         }
     }
 }
+
+struct PowerCard: View {
+    let snapshot: BatterySnapshot
+
+    var body: some View {
+        Card {
+            SectionHeader(symbol: "bolt.circle.fill", tint: Panel.amber,
+                          title: "Power & Electrical")
+                .sectionDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    StatBlock(label: "Power Usage",
+                              value: String(format: "%.1f", abs(snapshot.watts)), unit: "W")
+                    StatBlock(label: "Voltage",
+                              value: String(format: "%.2f", snapshot.voltage), unit: "V",
+                              alignment: .trailing)
+                }
+
+                HStack(alignment: .top) {
+                    StatBlock(label: "Current",
+                              value: "\(abs(Int(snapshot.amperage * 1000)))", unit: "mA")
+
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Image(systemName: snapshot.isCharging ? "arrow.up.circle.fill"
+                                                                  : "arrow.down.circle.fill")
+                                .font(.system(size: 11))
+                            Text(snapshot.isCharging ? "Charging"
+                                 : (snapshot.isPluggedIn ? "Holding" : "Discharging"))
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(snapshot.isCharging ? Panel.green : Panel.amber)
+
+                        if let watts = snapshot.adapterWatts, snapshot.isPluggedIn {
+                            Text("\(watts)W adapter")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Panel.secondary)
+                        } else {
+                            Text("Normal voltage")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Panel.green)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 10)
+                }
+            }
+            .padding(14)
+        }
+    }
+}
+
+struct CapacityCard: View {
+    let snapshot: BatterySnapshot
+
+    var body: some View {
+        Card {
+            SectionHeader(symbol: "battery.100percent", tint: Panel.blue,
+                          title: "Capacity Details")
+                .sectionDivider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                ValueRow(label: "Remaining", value: grouped(snapshot.rawCurrentCapacity),
+                         unit: "mAh", tint: Panel.green)
+                ValueRow(label: "Current Full", value: grouped(snapshot.rawMaxCapacity),
+                         unit: "mAh", tint: Panel.blue)
+                ValueRow(label: "Design Capacity", value: grouped(snapshot.designCapacity),
+                         unit: "mAh", tint: Panel.secondary)
+            }
+            .padding(14)
+        }
+    }
+}
+
 
 // MARK: - Accessories
 
