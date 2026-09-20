@@ -83,13 +83,12 @@ final class AlertEngine {
 
             guard shouldFire else { continue }
             firedLevels[rule.id] = Date()
-            let urgency = Self.urgency(for: new.percentage)
             present(
                 title: "\(new.percentage)% Remaining",
-                body: urgency == .critical ? "Connect charger immediately" : new.untilText,
+                body: rule.level <= 5 ? "Connect charger immediately" : new.untilText,
                 level: new.percentage,
                 sound: rule.sound,
-                urgency: urgency
+                accent: rule.color
             )
         }
     }
@@ -113,11 +112,8 @@ final class AlertEngine {
             body = String(format: "Pack is at %.0f°C.", snapshot.temperatureC)
         }
 
-        let urgency: HUDUrgency = event == .highTemperature
-            ? .warning
-            : (event == .unplugged ? Self.urgency(for: snapshot.percentage) : .normal)
         present(title: event.title, body: body, level: snapshot.percentage,
-                sound: alert.sound, urgency: urgency)
+                sound: alert.sound, accent: alert.color)
     }
 
     // MARK: - Accessories
@@ -135,8 +131,8 @@ final class AlertEngine {
                 firedDeviceAlerts.insert(device.id)
                 present(title: "\(device.name) at \(device.lowestPercent)%",
                         body: "Time to charge it",
-                        level: device.lowestPercent, sound: .ping, urgency: .warning,
-                        symbol: device.kind.symbol)
+                        level: device.lowestPercent, sound: .ping,
+                        accent: prefs.deviceAlertColor, symbol: device.kind.symbol)
             } else if device.lowestPercent > threshold + 5 {
                 // Rearm once it has meaningfully recovered.
                 firedDeviceAlerts.remove(device.id)
@@ -144,20 +140,10 @@ final class AlertEngine {
         }
     }
 
-    /// Colour follows the level, the way the alert reads at a glance:
-    /// green comfortable, amber getting low, red act now.
-    static func urgency(for percent: Int) -> HUDUrgency {
-        switch percent {
-        case ..<6: return .critical
-        case ..<21: return .warning
-        default: return .normal
-        }
-    }
-
     // MARK: - Presentation
 
     func present(title: String, body: String, level: Int, sound: AlertSound,
-                 urgency: HUDUrgency, symbol: String? = nil) {
+                 accent: AlertColor, symbol: String? = nil) {
         if let name = sound.systemName, let nsSound = NSSound(named: name) {
             nsSound.play()
         }
@@ -166,7 +152,7 @@ final class AlertEngine {
             let glow = prefs.screenGlow
             Task { @MainActor in
                 HUDPresenter.shared.show(title: title, body: body, level: level,
-                                         urgency: urgency, symbol: symbol,
+                                         accent: accent, symbol: symbol,
                                          duration: seconds, glow: glow)
             }
         }

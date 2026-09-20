@@ -38,6 +38,7 @@ final class Preferences: ObservableObject {
     @Published var trackDeviceBatteries: Bool = true { didSet { save() } }
     @Published var deviceAlertLevel: Int = 15 { didSet { save() } }
     @Published var deviceAlertsEnabled: Bool = true { didSet { save() } }
+    @Published var deviceAlertColor: AlertColor = .amber { didSet { save() } }
 
     @Published var highTemperatureC: Double = 40 { didSet { save() } }
     @Published var trackEnergy: Bool = true { didSet { save() } }
@@ -86,6 +87,7 @@ final class Preferences: ObservableObject {
         var trackDeviceBatteries: Bool
         var deviceAlertLevel: Int
         var deviceAlertsEnabled: Bool
+        var deviceAlertColor: AlertColor?
         var highTemperatureC: Double
         var trackEnergy: Bool
     }
@@ -106,6 +108,7 @@ final class Preferences: ObservableObject {
         trackDeviceBatteries = p.trackDeviceBatteries
         deviceAlertLevel = p.deviceAlertLevel
         deviceAlertsEnabled = p.deviceAlertsEnabled
+        deviceAlertColor = p.deviceAlertColor ?? .amber
         highTemperatureC = p.highTemperatureC
         trackEnergy = p.trackEnergy
         isLoading = false
@@ -121,6 +124,7 @@ final class Preferences: ObservableObject {
                               trackDeviceBatteries: trackDeviceBatteries,
                               deviceAlertLevel: deviceAlertLevel,
                               deviceAlertsEnabled: deviceAlertsEnabled,
+                              deviceAlertColor: deviceAlertColor,
                               highTemperatureC: highTemperatureC, trackEnergy: trackEnergy)
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? data.write(to: url, options: .atomic)

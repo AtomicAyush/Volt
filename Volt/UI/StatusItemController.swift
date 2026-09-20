@@ -114,7 +114,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                                    body: snapshot.untilText,
                                    level: snapshot.percentage,
                                    sound: .ping,
-                                   urgency: AlertEngine.urgency(for: snapshot.percentage))
+                                   accent: BatteryTint.color(percentage: snapshot.percentage,
+                                                             charging: snapshot.isCharging))
     }
 
     @objc func openSettings() {

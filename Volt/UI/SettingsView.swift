@@ -1,6 +1,37 @@
 import SwiftUI
 import AppKit
 
+/// A compact colour chooser for an alert.
+struct ColorWell: View {
+    @Binding var selection: AlertColor
+
+    var body: some View {
+        Menu {
+            ForEach(AlertColor.allCases) { option in
+                Button {
+                    selection = option
+                } label: {
+                    HStack {
+                        Image(systemName: option == selection ? "checkmark.circle.fill" : "circle.fill")
+                            .foregroundStyle(option.color)
+                        Text(option.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(selection.color)
+                    .frame(width: 12, height: 12)
+                    .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
+                Text(selection.label).font(.system(size: 11))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 96)
+    }
+}
+
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -14,6 +45,8 @@ struct SettingsView: View {
                 .tabItem { Label("Devices", systemImage: "airpods.pro") }
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AboutSettings()
+                .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 520, height: 560)
     }
@@ -28,7 +61,7 @@ struct AlertSettings: View {
     var body: some View {
         Form {
             Section {
-                Text("Volt alerts you every time the battery falls past one of these levels. macOS only ever gives you 10% and 5%.")
+                Text("Volt alerts you every time the battery falls past one of these levels. macOS only ever gives you 10% and 5%. Each alert's colour is used for its notification, and for the battery readout once the charge has fallen that far.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
@@ -57,7 +90,9 @@ struct AlertSettings: View {
                             Text("Every 30 min").tag(30)
                         }
                         .labelsHidden()
-                        .frame(width: 120)
+                        .frame(width: 112)
+
+                        ColorWell(selection: $alert.color)
 
                         Button {
                             prefs.levelAlerts.removeAll { $0.id == alert.id }
@@ -100,10 +135,18 @@ struct AlertSettings: View {
                         if on { Notifier.shared.requestAuthorizationIfNeeded() }
                     }
 
-                Button("Preview an alert") {
-                    AlertEngine.shared.present(title: "18% Remaining",
-                                               body: "1h 12min until empty",
-                                               level: 18, sound: .ping, urgency: .warning)
+                HStack {
+                    Text("Preview")
+                    Spacer()
+                    ForEach(prefs.levelAlerts) { alert in
+                        Button("\(alert.level)%") {
+                            AlertEngine.shared.present(
+                                title: "\(alert.level)% Remaining",
+                                body: alert.level <= 5 ? "Connect charger immediately"
+                                                       : "1h 12min until empty",
+                                level: alert.level, sound: alert.sound, accent: alert.color)
+                        }
+                    }
                 }
             } header: {
                 Text("How alerts look").font(.system(size: 12, weight: .semibold))
@@ -134,11 +177,14 @@ struct LifecycleSettings: View {
                                 ForEach(AlertSound.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .frame(width: 110)
+                            .frame(width: 104)
                             .disabled(!binding.wrappedValue.isEnabled)
                             .onChange(of: binding.wrappedValue.sound) { _, sound in
                                 if let name = sound.systemName { NSSound(named: name)?.play() }
                             }
+
+                            ColorWell(selection: binding.color)
+                                .disabled(!binding.wrappedValue.isEnabled)
                         }
                         Text(event.explanation)
                             .font(.system(size: 10))
@@ -255,6 +301,7 @@ struct DeviceSettings: View {
                                           set: { prefs.deviceAlertLevel = Int($0) }),
                            in: 5...50, step: 5)
                     Text("\(prefs.deviceAlertLevel)%").monospacedDigit().frame(width: 40)
+                    ColorWell(selection: $prefs.deviceAlertColor)
                 }
                 .disabled(!prefs.trackDeviceBatteries || !prefs.deviceAlertsEnabled)
             } header: {
@@ -340,5 +387,97 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - About
+
+struct AboutSettings: View {
+    private var version: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return short ?? "1.0"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 14) {
+                    Image(nsImage: MenuBarIcon.image(for: previewSnapshot,
+                                                     style: .pillNumber, colored: true))
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 34)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Volt")
+                            .font(.system(size: 22, weight: .bold))
+                        Text("Version \(version)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Made by Ayush Kansal")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("A battery app for macOS that does what the built-in one won't: alert at any level you choose, show how healthy the pack actually is, and keep track of everything else you carry.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("How it's built")
+                        .font(.system(size: 13, weight: .semibold))
+
+                    detail("Written in Swift, with SwiftUI for the panel and settings and AppKit for the menu bar item, the alert overlay and the icon, which is drawn by hand rather than assembled from system symbols.")
+                    detail("Charge, health, cycle count, temperature and current are read straight out of IOKit's AppleSmartBattery entry. Updates arrive from IOPowerSources the moment macOS notices a change, with a slow timer filling in the live values between them.")
+                    detail("iPhone and iPad report their battery over Bluetooth, through the standard GATT battery service, so no cable is needed. AirPods and other accessories come from the system's Bluetooth report, and Apple's own input devices from the IO registry.")
+                    detail("Per-app energy use is sampled from the same energy-impact figure Activity Monitor shows, then kept on disk so the 24-hour, 7-day and 30-day views have real history behind them.")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Privacy")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Nothing ever leaves this Mac. Preferences and energy history are stored in ~/Library/Application Support/Volt, and there is no network code anywhere in the app.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Charging")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Volt never changes how your Mac charges. It reads and reports; nothing is written to the charging controller.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func detail(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Circle()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 4, height: 4)
+                .padding(.top, 6)
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// A healthy-looking battery for the icon shown beside the title.
+    private var previewSnapshot: BatterySnapshot {
+        var snapshot = BatteryMonitor.shared.snapshot
+        if !snapshot.isPresent { snapshot.percentage = 82 }
+        return snapshot
     }
 }

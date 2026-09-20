@@ -33,7 +33,7 @@ final class HUDPresenter {
 
     private init() {}
 
-    func show(title: String, body: String, level: Int, urgency: HUDUrgency,
+    func show(title: String, body: String, level: Int, accent: AlertColor,
               symbol: String?, duration: Double, glow: Bool) {
         dismissTask?.cancel()
         tearDown(animated: false)
@@ -41,7 +41,7 @@ final class HUDPresenter {
         guard let screen = NSScreen.main else { return }
 
         let content = HUDView(title: title, message: body, level: level,
-                              urgency: urgency, symbol: symbol)
+                              accent: accent, symbol: symbol)
         let hosting = NSHostingView(rootView: content)
         hosting.layout()
         let size = hosting.fittingSize
@@ -67,7 +67,7 @@ final class HUDPresenter {
         panel.orderFrontRegardless()
         self.panel = panel
 
-        if glow { showGlow(urgency: urgency) }
+        if glow { showGlow(tint: accent.nsColor) }
 
         // Rise slightly and fade in.
         panel.setFrameOrigin(NSPoint(x: origin.x, y: origin.y - 14))
@@ -90,7 +90,7 @@ final class HUDPresenter {
 
     // MARK: - Glow
 
-    private func showGlow(urgency: HUDUrgency) {
+    private func showGlow(tint: NSColor) {
         for screen in NSScreen.screens {
             let window = NSWindow(contentRect: screen.frame,
                                   styleMask: [.borderless],
@@ -103,7 +103,7 @@ final class HUDPresenter {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
             let view = GlowView(frame: NSRect(origin: .zero, size: screen.frame.size))
-            view.tint = urgency.nsTint
+            view.tint = tint
             window.contentView = view
             window.setFrame(screen.frame, display: true)
             window.alphaValue = 0

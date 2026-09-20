@@ -8,6 +8,39 @@ private struct ContentHeightKey: PreferenceKey {
     }
 }
 
+/// Which group of panels the selector is showing.
+enum PanelTab: String, CaseIterable, Identifiable {
+    case battery = "Battery", devices = "Devices", energy = "Energy"
+    var id: String { rawValue }
+}
+
+/// Stands in for a panel whose feature has been switched off in settings.
+struct DisabledCard: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        Card {
+            VStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 20))
+                    .foregroundStyle(Panel.tertiary)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Panel.label)
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Panel.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 26)
+            .padding(.horizontal, 14)
+        }
+    }
+}
+
 /// The panel that drops out of the menu bar: current charge at the top, then
 /// collapsible cards for health, accessories and what is draining the battery.
 struct PopoverView: View {
@@ -17,6 +50,8 @@ struct PopoverView: View {
     @ObservedObject private var battery = BatteryMonitor.shared
     @ObservedObject private var devices = DeviceMonitor.shared
     @ObservedObject private var prefs = Preferences.shared
+
+    @State private var tab: PanelTab = .battery
 
     /// Measured height of the card column, so the popover is exactly as tall as it
     /// needs to be and grows as sections are expanded.
@@ -29,16 +64,29 @@ struct PopoverView: View {
         ScrollView {
             VStack(spacing: 12) {
                 StatusCard(snapshot: battery.snapshot)
-                HealthCard(snapshot: battery.snapshot)
-                TemperatureCard(snapshot: battery.snapshot)
-                PowerCard(snapshot: battery.snapshot)
-                CapacityCard(snapshot: battery.snapshot)
 
-                if prefs.trackDeviceBatteries {
-                    DevicesCard(devices: devices.devices)
-                }
-                if prefs.trackEnergy {
-                    EnergyCard()
+                Segments(options: PanelTab.allCases, title: { $0.rawValue }, selection: $tab)
+
+                switch tab {
+                case .battery:
+                    HealthCard(snapshot: battery.snapshot)
+                    TemperatureCard(snapshot: battery.snapshot)
+                    PowerCard(snapshot: battery.snapshot)
+                    CapacityCard(snapshot: battery.snapshot)
+                case .devices:
+                    if prefs.trackDeviceBatteries {
+                        DevicesCard(devices: devices.devices)
+                    } else {
+                        DisabledCard(symbol: "airpods.pro", title: "Accessory tracking is off",
+                                     detail: "Turn it on in Settings › Devices.")
+                    }
+                case .energy:
+                    if prefs.trackEnergy {
+                        EnergyCard()
+                    } else {
+                        DisabledCard(symbol: "bolt.slash", title: "Energy tracking is off",
+                                     detail: "Turn it on in Settings › General.")
+                    }
                 }
 
                 ActionsCard(openSettings: openSettings, quit: quit)
@@ -67,12 +115,7 @@ struct StatusCard: View {
     let snapshot: BatterySnapshot
 
     private var tint: Color {
-        if snapshot.isCharging { return Panel.green }
-        switch snapshot.percentage {
-        case ..<11: return Panel.red
-        case ..<21: return Panel.amber
-        default: return Panel.green
-        }
+        BatteryTint.swiftUIColor(percentage: snapshot.percentage, charging: snapshot.isCharging)
     }
 
     private var stateText: String {

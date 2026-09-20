@@ -6,8 +6,10 @@ struct HUDView: View {
     let title: String
     let message: String
     let level: Int
-    let urgency: HUDUrgency
+    let accent: AlertColor
     let symbol: String?
+
+    private var tint: Color { accent.color }
 
     var body: some View {
         HStack(spacing: 20) {
@@ -31,11 +33,11 @@ struct HUDView: View {
                 Capsule().fill(Color(white: 0.07))
                 // Inner hairline, then the bright ring that carries the colour.
                 Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1).padding(3)
-                Capsule().strokeBorder(urgency.tint, lineWidth: 3.5)
+                Capsule().strokeBorder(tint, lineWidth: 3.5)
             }
             .compositingGroup()
-            .shadow(color: urgency.tint.opacity(0.55), radius: 16)
-            .shadow(color: urgency.tint.opacity(0.35), radius: 34)
+            .shadow(color: tint.opacity(0.55), radius: 16)
+            .shadow(color: tint.opacity(0.35), radius: 34)
             .shadow(color: .black.opacity(0.45), radius: 24, y: 10)
         }
         .padding(46) // room for the glow to fall off inside the panel
@@ -46,10 +48,10 @@ struct HUDView: View {
         if let symbol {
             Image(systemName: symbol)
                 .font(.system(size: 30, weight: .medium))
-                .foregroundStyle(urgency.tint)
+                .foregroundStyle(tint)
                 .frame(width: 46)
         } else {
-            BatteryGlyph(level: level, tint: urgency.tint, outlineTint: true)
+            BatteryGlyph(level: level, tint: tint, outlineTint: true)
                 .frame(width: 46, height: 23)
         }
     }

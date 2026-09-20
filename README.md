@@ -11,11 +11,19 @@ nothing about the health of the pack. Volt fills that in.
 ## What it does
 
 **Alerts you can actually configure.** Any number of low-battery levels, each with its
-own sound and an optional repeat. Alerts are edge-triggered — they fire when the charge
-crosses a level, not for as long as it stays there — and rearm when you plug in.
+own sound, colour and optional repeat. Alerts are edge-triggered — they fire when the
+charge crosses a level, not for as long as it stays there — and rearm when you plug in.
+
+An alert's colour is not just for its notification: once the charge falls to that level,
+the menu bar icon and the panel's readout take the same colour. One resolver feeds all
+three, so the icon and the readout can never disagree.
 
 **Charging lifecycle.** Optional alerts for charger connected, charger pulled, reaching
 80%, full charge, and the pack running hot.
+
+**A panel per topic.** Health, temperature, power, capacity, devices and energy are each
+their own panel, reached from a selector at the top rather than by scrolling past
+everything.
 
 **Health.** Capacity against design capacity, cycle count, condition, temperature, live
 watts / volts / amps, and raw mAh. Where macOS reports its own "Maximum Capacity"

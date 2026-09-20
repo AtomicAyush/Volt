@@ -22,17 +22,10 @@ enum MenuBarIcon {
     }
 
     /// In the numbered style the interior is filled solid and the colour alone carries
-    /// the level, so it steps through a wider range than the simple three-way warning
-    /// tint the other styles use.
+    /// the level, so it comes from the shared resolver — which honours whatever colour
+    /// the user gave the alert for this level.
     static func levelColor(for percent: Int, charging: Bool) -> NSColor {
-        if charging { return NSColor(red: 0.20, green: 0.80, blue: 0.36, alpha: 1) }
-        switch percent {
-        case ..<10: return NSColor(red: 0.96, green: 0.24, blue: 0.21, alpha: 1)  // red
-        case ..<20: return NSColor(red: 0.98, green: 0.45, blue: 0.13, alpha: 1)  // orange
-        case ..<35: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)  // amber
-        case ..<60: return NSColor(red: 0.80, green: 0.80, blue: 0.14, alpha: 1)  // lime
-        default: return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)     // green
-        }
+        BatteryTint.nsColor(percentage: percent, charging: charging)
     }
 
     /// Black or white, whichever stands out against the fill. Picked from relative
