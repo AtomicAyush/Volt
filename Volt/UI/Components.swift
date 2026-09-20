@@ -27,13 +27,11 @@ struct Card<Content: View>: View {
     }
 }
 
-/// The titled header at the top of a section, with a tinted glyph and an
-/// optional disclosure chevron.
+/// The titled header at the top of a panel, with a tinted glyph.
 struct SectionHeader: View {
     let symbol: String
     let tint: Color
     let title: String
-    var isExpanded: Binding<Bool>?
 
     var body: some View {
         HStack(spacing: 9) {
@@ -47,21 +45,9 @@ struct SectionHeader: View {
                 .foregroundStyle(Panel.label)
 
             Spacer()
-
-            if let isExpanded {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Panel.secondary)
-                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : 180))
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard let isExpanded else { return }
-            withAnimation(.easeInOut(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
-        }
     }
 }
 

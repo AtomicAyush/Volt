@@ -21,16 +21,29 @@ enum MenuBarIcon {
         }
     }
 
-    /// The numbered style always fills with a real colour — green when the charge is
-    /// healthy rather than the label colour — because the digits sit on top of it and
-    /// white-on-white would vanish at a full charge.
+    /// In the numbered style the interior is filled solid and the colour alone carries
+    /// the level, so it steps through a wider range than the simple three-way warning
+    /// tint the other styles use.
     static func levelColor(for percent: Int, charging: Bool) -> NSColor {
-        if charging { return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1) }
+        if charging { return NSColor(red: 0.20, green: 0.80, blue: 0.36, alpha: 1) }
         switch percent {
-        case ..<11: return NSColor(red: 1.00, green: 0.27, blue: 0.23, alpha: 1)
-        case ..<21: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)
-        default: return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)
+        case ..<10: return NSColor(red: 0.96, green: 0.24, blue: 0.21, alpha: 1)  // red
+        case ..<20: return NSColor(red: 0.98, green: 0.45, blue: 0.13, alpha: 1)  // orange
+        case ..<35: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)  // amber
+        case ..<60: return NSColor(red: 0.80, green: 0.80, blue: 0.14, alpha: 1)  // lime
+        default: return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)     // green
         }
+    }
+
+    /// Black or white, whichever stands out against the fill. Picked from relative
+    /// luminance rather than fixed per colour, so the digits stay readable if the
+    /// palette above is ever retuned.
+    private static func contrasting(with color: NSColor) -> NSColor {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return .black }
+        let luminance = 0.2126 * rgb.redComponent
+            + 0.7152 * rgb.greenComponent
+            + 0.0722 * rgb.blueComponent
+        return luminance > 0.55 ? .black : .white
     }
 
     static func fillColor(for percent: Int, charging: Bool, colored: Bool) -> NSColor {
@@ -87,33 +100,43 @@ enum MenuBarIcon {
         let interior = NSBezierPath(roundedRect: inset, xRadius: 2.1, yRadius: 2.1)
 
         let fraction = max(0, min(1, CGFloat(snapshot.percentage) / 100))
-        if fraction > 0 {
+
+        if showNumber {
+            // Solid interior: the colour is the level indicator, so there is no
+            // proportional bar and the digits always sit on one even surface.
+            fill.setFill()
+            interior.fill()
+        } else if fraction > 0 {
             let levelRect = NSRect(x: inset.minX, y: inset.minY,
                                    width: max(1.5, inset.width * fraction), height: inset.height)
             NSGraphicsContext.saveGraphicsState()
             interior.addClip()
-            // Saturated when coloured, since the digits are white or black on top of a
-            // green, amber or red block. A template icon has only one colour to work
-            // with, so there the fill is held back instead.
-            fill.withAlphaComponent(showNumber && !colored ? 0.3 : 1).setFill()
+            fill.setFill()
             NSBezierPath(rect: levelRect).fill()
             NSGraphicsContext.restoreGraphicsState()
         }
 
         if showNumber {
-            // Drawn solid in the label colour rather than punched out of the fill.
-            // A knockout shows whatever is behind the menu bar, which disappears
-            // against a light wallpaper and wherever the battery is nearly empty.
             let text = "\(snapshot.percentage)"
             let size: CGFloat = text.count > 2 ? 9 : 10
             let font = NSFont.systemFont(ofSize: size, weight: .bold)
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: font, .foregroundColor: NSColor.labelColor
+                .font: font,
+                .foregroundColor: colored ? contrasting(with: fill) : NSColor.black
             ]
             let bounds = text.size(withAttributes: attributes)
-            text.draw(at: NSPoint(x: shell.midX - bounds.width / 2,
-                                  y: shell.midY - bounds.height / 2),
-                      withAttributes: attributes)
+            let origin = NSPoint(x: shell.midX - bounds.width / 2,
+                                 y: shell.midY - bounds.height / 2)
+
+            if colored {
+                text.draw(at: origin, withAttributes: attributes)
+            } else {
+                // A template icon is a single colour plus alpha, so the digits are
+                // punched out of the solid fill instead of drawn on top of it.
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                text.draw(at: origin, withAttributes: attributes)
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+            }
         } else if snapshot.isCharging {
             // With no number to make room for, the bolt sits inside the shell.
             let boltRect = NSRect(x: shell.midX - 2.5, y: shell.midY - 4.5, width: 5, height: 9)

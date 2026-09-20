@@ -25,21 +25,17 @@ struct PopoverView: View {
     private let minHeight: CGFloat = 320
     private let maxHeight: CGFloat = 760
 
-    @State private var showInfo = true
-    @State private var showDevices = true
-    @State private var showEnergy = false
-
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
                 StatusCard(snapshot: battery.snapshot)
-                InfoCard(snapshot: battery.snapshot, isExpanded: $showInfo)
+                InfoCard(snapshot: battery.snapshot)
 
                 if prefs.trackDeviceBatteries {
-                    DevicesCard(devices: devices.devices, isExpanded: $showDevices)
+                    DevicesCard(devices: devices.devices)
                 }
                 if prefs.trackEnergy {
-                    EnergyCard(isExpanded: $showEnergy)
+                    EnergyCard()
                 }
 
                 ActionsCard(openSettings: openSettings, quit: quit)
@@ -153,7 +149,6 @@ struct StatusCard: View {
 
 struct InfoCard: View {
     let snapshot: BatterySnapshot
-    @Binding var isExpanded: Bool
 
     /// Apple's own "Maximum Capacity" when macOS has reported it, otherwise the
     /// figure computed from the gauge.
@@ -181,15 +176,13 @@ struct InfoCard: View {
     var body: some View {
         Card {
             SectionHeader(symbol: "info.circle.fill", tint: Panel.blue,
-                          title: "Battery Information", isExpanded: $isExpanded)
+                          title: "Battery Information")
                 .sectionDivider()
 
-            if isExpanded {
-                healthSection.padding(14).sectionDivider()
-                temperatureSection.padding(14).sectionDivider()
-                powerSection.padding(14).sectionDivider()
-                capacitySection.padding(14)
-            }
+            healthSection.padding(14).sectionDivider()
+            temperatureSection.padding(14).sectionDivider()
+            powerSection.padding(14).sectionDivider()
+            capacitySection.padding(14)
         }
     }
 
@@ -358,26 +351,23 @@ struct InfoCard: View {
 
 struct DevicesCard: View {
     let devices: [DeviceBattery]
-    @Binding var isExpanded: Bool
 
     var body: some View {
         Card {
             SectionHeader(symbol: "airpods.pro", tint: Panel.green,
-                          title: "Other Devices", isExpanded: $isExpanded)
+                          title: "Other Devices")
                 .sectionDivider()
 
-            if isExpanded {
-                if devices.isEmpty {
-                    Text("Nothing reporting a battery yet. Connect AirPods, a Magic Mouse or a keyboard.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Panel.secondary)
-                        .padding(14)
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(devices) { DeviceRow(device: $0) }
-                    }
+            if devices.isEmpty {
+                Text("Nothing reporting a battery yet. Connect AirPods, a Magic Mouse or a keyboard.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Panel.secondary)
                     .padding(14)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(devices) { DeviceRow(device: $0) }
                 }
+                .padding(14)
             }
         }
     }
@@ -386,52 +376,49 @@ struct DevicesCard: View {
 // MARK: - Energy
 
 struct EnergyCard: View {
-    @Binding var isExpanded: Bool
     @ObservedObject private var monitor = EnergyMonitor.shared
     @State private var window: EnergyWindow = .live
 
     var body: some View {
         Card {
             SectionHeader(symbol: "bolt.fill", tint: Panel.amber,
-                          title: "Energy Use", isExpanded: $isExpanded)
+                          title: "Energy Use")
                 .sectionDivider()
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    Segments(options: EnergyWindow.allCases,
-                             title: { $0.rawValue },
-                             selection: $window)
+            VStack(alignment: .leading, spacing: 10) {
+                Segments(options: EnergyWindow.allCases,
+                         title: { $0.rawValue },
+                         selection: $window)
 
-                    if !monitor.callouts.isEmpty {
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Panel.amber)
-                            Text("\(monitor.callouts.joined(separator: ", ")) — far above its usual draw.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Panel.secondary)
-                        }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(Panel.amber.opacity(0.12)))
-                    }
-
-                    let entries = monitor.ranked(window)
-                    if entries.isEmpty {
-                        Text(window == .live ? "Sampling…"
-                             : "No history for this window yet — Volt fills it in as it runs.")
-                            .font(.system(size: 11))
+                if !monitor.callouts.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Panel.amber)
+                        Text("\(monitor.callouts.joined(separator: ", ")) — far above its usual draw.")
+                            .font(.system(size: 10))
                             .foregroundStyle(Panel.secondary)
-                    } else {
-                        let peak = entries.map(\.impact).max() ?? 1
-                        ForEach(entries) { entry in
-                            EnergyRow(entry: entry, peak: peak,
-                                      series: monitor.series(for: entry.name, window: window))
-                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Panel.amber.opacity(0.12)))
+                }
+
+                let entries = monitor.ranked(window)
+                if entries.isEmpty {
+                    Text(window == .live ? "Sampling…"
+                         : "No history for this window yet — Volt fills it in as it runs.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Panel.secondary)
+                } else {
+                    let peak = entries.map(\.impact).max() ?? 1
+                    ForEach(entries) { entry in
+                        EnergyRow(entry: entry, peak: peak,
+                                  series: monitor.series(for: entry.name, window: window))
                     }
                 }
-                .padding(14)
             }
+            .padding(14)
         }
     }
 }
