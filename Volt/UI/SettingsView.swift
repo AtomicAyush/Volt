@@ -238,7 +238,14 @@ struct DeviceSettings: View {
             Section {
                 Toggle("Track AirPods, mice, keyboards and trackpads", isOn: $prefs.trackDeviceBatteries)
                     .onChange(of: prefs.trackDeviceBatteries) { _, on in
-                        on ? DeviceMonitor.shared.start() : DeviceMonitor.shared.stop()
+                        if on {
+                            BLEBatteryMonitor.shared.start()
+                            IOSDeviceMonitor.shared.start()
+                            DeviceMonitor.shared.start()
+                        } else {
+                            BLEBatteryMonitor.shared.stop()
+                            DeviceMonitor.shared.stop()
+                        }
                     }
                 Toggle("Alert me when one runs low", isOn: $prefs.deviceAlertsEnabled)
                     .disabled(!prefs.trackDeviceBatteries)
@@ -253,7 +260,7 @@ struct DeviceSettings: View {
             } header: {
                 Text("Accessories").font(.system(size: 12, weight: .semibold))
             } footer: {
-                Text("Levels come from macOS's Bluetooth report, which refreshes about once a minute.")
+                Text("AirPods and accessories come from macOS's Bluetooth report. iPhone and iPad levels are read straight from the Bluetooth battery service, which needs the device paired and nearby — health and cycle count still need a cable.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -275,7 +282,11 @@ struct DeviceSettings: View {
                         }
                     }
                 }
-                Button("Refresh now") { DeviceMonitor.shared.refresh() }
+                Button("Refresh now") {
+                    BLEBatteryMonitor.shared.refresh()
+                    IOSDeviceMonitor.shared.refresh()
+                    DeviceMonitor.shared.refresh()
+                }
             } header: {
                 Text("Found").font(.system(size: 12, weight: .semibold))
             }

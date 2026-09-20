@@ -67,16 +67,16 @@ struct EnergyRow: View {
     var body: some View {
         HStack(spacing: 9) {
             if let icon = entry.icon {
-                Image(nsImage: icon).resizable().frame(width: 20, height: 20)
+                Image(nsImage: icon).resizable().frame(width: 17, height: 17)
             } else {
                 RoundedRectangle(cornerRadius: 3.5)
                     .fill(Color.primary.opacity(0.1))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 17, height: 17)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -85,16 +85,16 @@ struct EnergyRow: View {
                             .frame(width: max(3, geo.size.width * CGFloat(entry.impact / max(peak, 1))))
                     }
                 }
-                .frame(height: 5)
+                .frame(height: 4)
             }
 
             if series.contains(where: { $0 > 0 }) {
                 Sparkline(values: series, tint: tint)
-                    .frame(width: 50, height: 18)
+                    .frame(width: 42, height: 16)
             }
 
             Text(String(format: "%.0f", entry.impact))
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 28, alignment: .trailing)

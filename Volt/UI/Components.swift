@@ -38,12 +38,12 @@ struct SectionHeader: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(tint)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
 
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(Panel.label)
 
             Spacer()
@@ -55,8 +55,8 @@ struct SectionHeader: View {
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 0 : 180))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
             guard let isExpanded else { return }
@@ -108,11 +108,11 @@ struct StatBlock: View {
     var body: some View {
         VStack(alignment: alignment, spacing: 1) {
             Text(label)
-                .font(.system(size: 12))
+                .font(.system(size: 11))
                 .foregroundStyle(Panel.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)
                 if let unit {
@@ -136,12 +136,12 @@ struct ValueRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundStyle(Panel.secondary)
             Spacer()
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
-                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)
                 if let unit {
@@ -159,7 +159,7 @@ extension View {
     /// A hairline between sections inside a card.
     func sectionDivider() -> some View {
         overlay(alignment: .bottom) {
-            Rectangle().fill(Panel.hairline).frame(height: 1).padding(.horizontal, 16)
+            Rectangle().fill(Panel.hairline).frame(height: 1).padding(.horizontal, 14)
         }
     }
 }
@@ -183,10 +183,10 @@ struct Segments<T: Hashable & Identifiable>: View {
             ForEach(options) { option in
                 let isSelected = option == selection
                 Text(title(option))
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Panel.label : Panel.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 5)
                     .background {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(isSelected ? Color.white.opacity(0.14) : .clear)

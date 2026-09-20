@@ -25,12 +25,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let prefs = Preferences.shared
         if prefs.trackDeviceBatteries {
+            BLEBatteryMonitor.shared.start()
             IOSDeviceMonitor.shared.start()
             DeviceMonitor.shared.start()
         }
         if prefs.trackEnergy { EnergyMonitor.shared.start() }
         if prefs.postSystemNotification { Notifier.shared.requestAuthorizationIfNeeded() }
+        startDebugLoggingIfRequested()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Run the binary with VOLT_DEBUG=1 to watch device discovery from a terminal.
+    /// Useful when checking whether a phone is answering over Bluetooth.
+    private func startDebugLoggingIfRequested() {
+        // Either VOLT_DEBUG in the environment, or ~/.volt-debug on disk — the file
+        // works no matter how the app was launched.
+        let marker = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".volt-debug")
+        let enabled = ProcessInfo.processInfo.environment["VOLT_DEBUG"] != nil
+            || FileManager.default.fileExists(atPath: marker.path)
+        guard enabled else { return }
+        let logURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".volt-debug.log")
+
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            let ble = BLEBatteryMonitor.shared
+            var lines = ["--- \(Date())"]
+            lines.append("bluetooth state=\(ble.state.rawValue) ble=\(ble.batteries.map { "\($0.name):\($0.percent)%" })")
+            lines.append("cabled=\(IOSDeviceMonitor.shared.devices.map { "\($0.name):\($0.percent)%" })")
+            for d in DeviceMonitor.shared.devices {
+                lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent)) note=\(d.note ?? "-")")
+            }
+            let text = lines.joined(separator: "\n") + "\n"
+            if let data = text.data(using: .utf8) {
+                if let handle = try? FileHandle(forWritingTo: logURL) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    try? handle.close()
+                } else {
+                    try? data.write(to: logURL)
+                }
+            }
+        }
+    }
 }

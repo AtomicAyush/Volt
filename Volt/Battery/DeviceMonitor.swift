@@ -26,10 +26,12 @@ final class DeviceMonitor: ObservableObject {
     func start(interval: TimeInterval = 60) {
         IOSDeviceMonitor.shared.$devices
             .receive(on: RunLoop.main)
-            .sink { [weak self] cabled in
-                guard let self else { return }
-                self.publish(self.merge(self.lastScan, withCabled: cabled))
-            }
+            .sink { [weak self] _ in self?.remerge() }
+            .store(in: &cancellables)
+
+        BLEBatteryMonitor.shared.$batteries
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.remerge() }
             .store(in: &cancellables)
 
         refresh()
@@ -48,15 +50,45 @@ final class DeviceMonitor: ObservableObject {
             let found = Self.scanBluetooth() + Self.scanAppleHID()
             DispatchQueue.main.async {
                 self.lastScan = found
-                self.publish(self.merge(found, withCabled: IOSDeviceMonitor.shared.devices))
+                self.remerge()
             }
         }
     }
 
-    /// A phone read over the cable replaces the Bluetooth placeholder for the same
-    /// device; the names differ only in capitalisation, so match loosely.
-    private func merge(_ bluetooth: [DeviceBattery], withCabled cabled: [IOSDevice]) -> [DeviceBattery] {
+    private func remerge() {
+        publish(merge(lastScan,
+                      withCabled: IOSDeviceMonitor.shared.devices,
+                      andBLE: BLEBatteryMonitor.shared.batteries))
+    }
+
+    /// A real reading replaces the placeholder for the same device. Names differ
+    /// only in capitalisation and apostrophe style across sources, so match loosely.
+    private func merge(_ bluetooth: [DeviceBattery],
+                       withCabled cabled: [IOSDevice],
+                       andBLE ble: [BLEBattery]) -> [DeviceBattery] {
         var result = bluetooth
+
+        // Bluetooth first: the live percentage for a nearby iPhone or iPad.
+        for reading in ble {
+            let entry = DeviceBattery(
+                id: reading.id.uuidString,
+                name: reading.name,
+                kind: .from(minorType: nil, name: reading.name),
+                cells: [.init(label: "", percent: reading.percent)],
+                isCharging: false,
+                isConnected: true,
+                note: nil
+            )
+            if let index = result.firstIndex(where: {
+                Self.matches($0.name, reading.name) && !$0.hasReading
+            }) {
+                result[index] = entry
+            } else if !result.contains(where: { Self.matches($0.name, reading.name) }) {
+                result.append(entry)
+            }
+        }
+
+        // Then the cable, which also carries the charging state.
         for device in cabled {
             let entry = DeviceBattery(
                 id: device.udid,
@@ -67,14 +99,22 @@ final class DeviceMonitor: ObservableObject {
                 isConnected: true,
                 note: nil
             )
-            let key = device.name.lowercased()
-            if let index = result.firstIndex(where: { $0.name.lowercased() == key && !$0.hasReading }) {
+            if let index = result.firstIndex(where: { Self.matches($0.name, device.name) }) {
                 result[index] = entry
             } else {
                 result.append(entry)
             }
         }
         return result
+    }
+
+    /// "Ayush's Iphone" from Bluetooth and "Ayush's iPhone" from the cable are the
+    /// same device; compare on letters and digits only.
+    private static func matches(_ a: String, _ b: String) -> Bool {
+        func key(_ s: String) -> String {
+            s.lowercased().filter { $0.isLetter || $0.isNumber }
+        }
+        return key(a) == key(b)
     }
 
     private func publish(_ found: [DeviceBattery]) {
@@ -142,7 +182,7 @@ final class DeviceMonitor: ObservableObject {
             guard [.phone, .tablet, .watch].contains(kind) else { return nil }
             note = kind == .watch
                 ? "Battery is not published to this Mac"
-                : "Connect by cable to read battery"
+                : "Out of Bluetooth range — bring it nearby"
         }
 
         let address = (info["device_address"] as? String) ?? name

@@ -22,8 +22,8 @@ watts / volts / amps, and raw mAh. Where macOS reports its own "Maximum Capacity
 figure, that is shown in preference to the computed one.
 
 **Other devices.** AirPods report left, right and case separately. Magic Mouse, Magic
-Keyboard and Magic Trackpad come from the IO registry. iPhone and iPad batteries are
-read over the cable.
+Keyboard and Magic Trackpad come from the IO registry. iPhone and iPad battery is read
+over Bluetooth, with no cable — see below.
 
 **Energy use.** Which apps are draining the battery, using the same Energy Impact figure
 Activity Monitor shows, with 24h / 7d / 30d history kept on disk and a callout when an
@@ -58,13 +58,26 @@ does not unplug for you.
 
 Some things macOS simply does not expose:
 
-- **iPhone / iPad battery over Bluetooth.** macOS publishes only an address and signal
-  strength for them, so no app can read the level over the air. Volt reads it through
-  `MobileDevice.framework` when the device is plugged in and trusted, and otherwise says
-  so rather than guessing.
-- **Apple Watch battery.** Not published to the Mac at all.
+- **Apple Watch battery.** Not published to the Mac at all, by any route.
+- **iPhone / iPad health and cycle count.** `system_profiler` reports nothing for these
+  devices, and the health figures live behind `MobileDevice.framework`, which needs the
+  device plugged in and trusted at least once.
 
 Also not built: desktop widgets, and auto-dismissing macOS's own low-battery popups.
+
+## iPhone and iPad
+
+The live percentage comes from Bluetooth. An iPhone or iPad connected to the Mac
+exposes the standard GATT **Battery Service** (`0x180F`) with the **Battery Level**
+characteristic (`0x2A19`) — a public Bluetooth profile, nothing Apple-specific — so an
+ordinary `CBCentralManager` can read it. The device needs to be paired with the Mac and
+in range; no cable and no pairing record are required.
+
+This is deliberately separate from the `MobileDevice.framework` path, which is used only
+for health, cycle count and lifetime stats and does need a cable.
+
+macOS asks for Bluetooth permission the first time Volt scans. If the prompt does not
+appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 
 ## How it reads the battery
 
@@ -76,10 +89,17 @@ Also not built: desktop widgets, and auto-dismissing macOS's own low-battery pop
 | AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType` |
 | Magic Mouse / Keyboard / Trackpad | `ioreg -k BatteryPercent` |
 | Per-app energy | `top -stats pid,cpu,power,command` |
-| iPhone / iPad over cable | `MobileDevice.framework`, resolved with `dlsym` |
+| iPhone / iPad level | CoreBluetooth GATT `0x180F` / `0x2A19` |
+| iPhone / iPad health (cable) | `MobileDevice.framework`, resolved with `dlsym` |
 
 Nothing leaves the machine. Preferences and energy history live in
 `~/Library/Application Support/Volt/`.
+
+## Troubleshooting
+
+Create `~/.volt-debug` and restart Volt to have it append what it finds — Bluetooth
+state, discovered devices and their levels — to `~/.volt-debug.log`. Delete the marker
+file to turn it off again.
 
 ## Notes
 

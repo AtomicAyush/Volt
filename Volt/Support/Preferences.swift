@@ -12,7 +12,7 @@ enum IconStyle: String, Codable, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .pill: return "Battery"
-        case .pillNumber: return "Battery + percentage"
+        case .pillNumber: return "Battery with percentage inside"
         case .numberOnly: return "Number only"
         case .ring: return "Ring"
         }

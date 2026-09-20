@@ -21,6 +21,18 @@ enum MenuBarIcon {
         }
     }
 
+    /// The numbered style always fills with a real colour — green when the charge is
+    /// healthy rather than the label colour — because the digits sit on top of it and
+    /// white-on-white would vanish at a full charge.
+    static func levelColor(for percent: Int, charging: Bool) -> NSColor {
+        if charging { return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1) }
+        switch percent {
+        case ..<11: return NSColor(red: 1.00, green: 0.27, blue: 0.23, alpha: 1)
+        case ..<21: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)
+        default: return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)
+        }
+    }
+
     static func fillColor(for percent: Int, charging: Bool, colored: Bool) -> NSColor {
         guard colored else { return .labelColor }
         if charging { return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1) }
@@ -33,70 +45,91 @@ enum MenuBarIcon {
 
     // MARK: - Styles
 
-    /// iPhone-style horizontal battery, optionally preceded by the percentage.
+    /// iPhone-style horizontal battery with the percentage inside the shell.
     ///
-    /// The number sits outside the shell rather than inside it. Inside, it would have to
-    /// straddle the edge of the charge fill at middling levels and render half knocked-out,
-    /// half solid — which reads as a glitch. Outside, it is legible at every level.
+    /// The digits are punched out of the fill rather than drawn on top of it. For that
+    /// to read at every charge level the whole interior carries a faint track, so the
+    /// knockout lands on something solid even where the battery is nearly empty —
+    /// otherwise a number straddling the edge of the fill renders half dark, half light.
     private static func pill(snapshot: BatterySnapshot, showNumber: Bool, colored: Bool) -> NSImage {
-        let bodyWidth: CGFloat = 24
-        let bodyHeight: CGFloat = 12.5
+        let bodyWidth: CGFloat = showNumber ? 32 : 24
+        let bodyHeight: CGFloat = 13.5
         let capWidth: CGFloat = 2
         let capGap: CGFloat = 1.5
-
-        let numberFont = NSFont.systemFont(ofSize: 11, weight: .medium)
-        let numberText = "\(snapshot.percentage)"
-        let numberAttributes: [NSAttributedString.Key: Any] = [
-            .font: numberFont,
-            .foregroundColor: NSColor.labelColor
-        ]
-        let numberSize = showNumber ? numberText.size(withAttributes: numberAttributes) : .zero
-        let numberGap: CGFloat = showNumber ? 4 : 0
-
-        let left = ceil(numberSize.width) + numberGap
-        let width = left + bodyWidth + capGap + capWidth
+        let boltGap: CGFloat = snapshot.isCharging && showNumber ? 6.5 : 0
+        let width = bodyWidth + capGap + capWidth + boltGap
 
         let image = NSImage(size: NSSize(width: width, height: height))
         image.lockFocus()
 
-        if showNumber {
-            numberText.draw(at: NSPoint(x: 0, y: (height - numberSize.height) / 2),
-                            withAttributes: numberAttributes)
-        }
-
-        let outlineColor = NSColor.labelColor.withAlphaComponent(0.45)
-        let fill = fillColor(for: snapshot.percentage, charging: snapshot.isCharging, colored: colored)
+        // A brighter shell than the other styles use: the numbered icon is busier, so
+        // the outline has to hold it together.
+        let outlineColor = NSColor.labelColor.withAlphaComponent(showNumber ? 0.7 : 0.45)
+        let fill = showNumber && colored
+            ? levelColor(for: snapshot.percentage, charging: snapshot.isCharging)
+            : fillColor(for: snapshot.percentage, charging: snapshot.isCharging, colored: colored)
         let midY = (height - bodyHeight) / 2
 
         // Shell
-        let shell = NSRect(x: left + 0.75, y: midY, width: bodyWidth - 1.5, height: bodyHeight)
-        let shellPath = NSBezierPath(roundedRect: shell, xRadius: 3.6, yRadius: 3.6)
+        let shell = NSRect(x: 0.75, y: midY, width: bodyWidth - 1.5, height: bodyHeight)
+        let shellPath = NSBezierPath(roundedRect: shell, xRadius: 3.8, yRadius: 3.8)
         shellPath.lineWidth = 1.2
         outlineColor.setStroke()
         shellPath.stroke()
 
         // Cap
-        let cap = NSRect(x: left + bodyWidth + capGap - 0.75, y: (height - 5) / 2,
+        let cap = NSRect(x: bodyWidth + capGap - 0.75, y: (height - 5) / 2,
                          width: capWidth, height: 5)
         outlineColor.setFill()
         NSBezierPath(roundedRect: cap, xRadius: 1, yRadius: 1).fill()
 
-        // Charge level
-        let inset = shell.insetBy(dx: 2, dy: 2)
+        let inset = shell.insetBy(dx: 1.9, dy: 1.9)
+        let interior = NSBezierPath(roundedRect: inset, xRadius: 2.1, yRadius: 2.1)
+
         let fraction = max(0, min(1, CGFloat(snapshot.percentage) / 100))
-        var levelRect = NSRect(x: inset.minX, y: inset.minY, width: 0, height: inset.height)
         if fraction > 0 {
-            levelRect.size.width = max(1.5, inset.width * fraction)
-            fill.setFill()
-            NSBezierPath(roundedRect: levelRect, xRadius: 2, yRadius: 2).fill()
+            let levelRect = NSRect(x: inset.minX, y: inset.minY,
+                                   width: max(1.5, inset.width * fraction), height: inset.height)
+            NSGraphicsContext.saveGraphicsState()
+            interior.addClip()
+            // Saturated when coloured, since the digits are white or black on top of a
+            // green, amber or red block. A template icon has only one colour to work
+            // with, so there the fill is held back instead.
+            fill.withAlphaComponent(showNumber && !colored ? 0.3 : 1).setFill()
+            NSBezierPath(rect: levelRect).fill()
+            NSGraphicsContext.restoreGraphicsState()
         }
 
-        if snapshot.isCharging {
+        if showNumber {
+            // Drawn solid in the label colour rather than punched out of the fill.
+            // A knockout shows whatever is behind the menu bar, which disappears
+            // against a light wallpaper and wherever the battery is nearly empty.
+            let text = "\(snapshot.percentage)"
+            let size: CGFloat = text.count > 2 ? 9 : 10
+            let font = NSFont.systemFont(ofSize: size, weight: .bold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: NSColor.labelColor
+            ]
+            let bounds = text.size(withAttributes: attributes)
+            text.draw(at: NSPoint(x: shell.midX - bounds.width / 2,
+                                  y: shell.midY - bounds.height / 2),
+                      withAttributes: attributes)
+        } else if snapshot.isCharging {
+            // With no number to make room for, the bolt sits inside the shell.
             let boltRect = NSRect(x: shell.midX - 2.5, y: shell.midY - 4.5, width: 5, height: 9)
+            let levelRect = NSRect(x: inset.minX, y: inset.minY,
+                                   width: max(1.5, inset.width * fraction), height: inset.height)
             overlay(in: levelRect, shell: shell) { knockout in
                 (knockout ? NSColor.black : NSColor.labelColor).setFill()
                 boltPath(in: boltRect).fill()
             }
+        }
+
+        // When the number is inside, the charging bolt goes after the cap.
+        if snapshot.isCharging && showNumber {
+            fill.setFill()
+            boltPath(in: NSRect(x: bodyWidth + capGap + capWidth + 0.8,
+                                y: height / 2 - 5, width: 5, height: 10)).fill()
         }
 
         image.unlockFocus()

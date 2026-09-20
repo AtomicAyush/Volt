@@ -41,12 +41,12 @@ struct DeviceRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: device.kind.symbol)
-                    .font(.system(size: 14))
-                    .frame(width: 20)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
                     .foregroundStyle(device.isConnected ? .primary : .tertiary)
 
                 Text(device.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .foregroundStyle(device.isConnected ? .primary : .secondary)
 
@@ -74,7 +74,7 @@ struct DeviceRow: View {
                 HStack(spacing: 8) {
                     if !cell.label.isEmpty {
                         Text(cell.label)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                             .frame(width: 30, alignment: .leading)
                     }
@@ -85,13 +85,13 @@ struct DeviceRow: View {
                                 .frame(width: max(3, geo.size.width * CGFloat(cell.percent) / 100))
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: 5)
 
                     Text("\(cell.percent)%")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(device.isConnected ? .primary : .secondary)
-                        .frame(width: 44, alignment: .trailing)
+                        .frame(width: 38, alignment: .trailing)
                 }
                 .padding(.leading, cell.label.isEmpty ? 26 : 26)
             }

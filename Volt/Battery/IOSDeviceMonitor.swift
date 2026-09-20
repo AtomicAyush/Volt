@@ -8,6 +8,8 @@ struct IOSDevice: Equatable {
     let productType: String     // e.g. "iPhone17,2"
     let percent: Int
     let isCharging: Bool
+    /// True when read over Wi-Fi rather than the cable.
+    var isOverWiFi: Bool = false
 
     var kind: DeviceBattery.Kind {
         if productType.hasPrefix("iPad") { return .tablet }
@@ -49,12 +51,21 @@ final class IOSDeviceMonitor: ObservableObject {
         AMNotificationCallback, UInt32, UInt32,
         UnsafeMutableRawPointer?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?
     ) -> Int32
+    private typealias SubscribeWithOptionsFn = @convention(c) (
+        AMNotificationCallback, UInt32, UInt32,
+        UnsafeMutableRawPointer?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?, CFDictionary?
+    ) -> Int32
+    private typealias CreateDeviceListFn = @convention(c) () -> Unmanaged<CFArray>?
+    private typealias InterfaceTypeFn = @convention(c) (DeviceRef?) -> Int32
     private typealias DeviceFn = @convention(c) (DeviceRef?) -> Int32
     private typealias CopyValueFn = @convention(c) (DeviceRef?, CFString?, CFString?) -> Unmanaged<CFTypeRef>?
     private typealias CopyIdentifierFn = @convention(c) (DeviceRef?) -> Unmanaged<CFString>?
 
     private var handle: UnsafeMutableRawPointer?
     private var subscribe: SubscribeFn?
+    private var subscribeWithOptions: SubscribeWithOptionsFn?
+    private var createDeviceList: CreateDeviceListFn?
+    private var interfaceType: InterfaceTypeFn?
     private var connect: DeviceFn?
     private var disconnect: DeviceFn?
     private var validatePairing: DeviceFn?
@@ -75,8 +86,19 @@ final class IOSDeviceMonitor: ObservableObject {
         guard load() else { return }
         isAvailable = true
 
+        // Ask for devices reachable over Wi-Fi as well as the cable. A device that
+        // has been paired once over USB, with Wi-Fi sync enabled, keeps answering
+        // wirelessly after that; without those options only cabled devices appear.
+        let options: [CFString: Any] = [
+            "NotificationOptionSearchForPairedDevices" as CFString: kCFBooleanTrue!,
+            "NotificationOptionSearchForWiFiPairableDevices" as CFString: kCFBooleanTrue!,
+            "EnableWifiConnections" as CFString: kCFBooleanTrue!,
+            "NotificationOptionEnableUSBMux" as CFString: kCFBooleanTrue!,
+            "NotificationOptionEnableRemoteXPC" as CFString: kCFBooleanTrue!,
+        ]
+
         var token: UnsafeMutableRawPointer?
-        _ = subscribe?({ info, _ in
+        let callback: AMNotificationCallback = { info, _ in
             guard let info else { return }
             let device = info.load(fromByteOffset: AMCallbackInfo.deviceOffset,
                                    as: OpaquePointer?.self)
@@ -89,9 +111,16 @@ final class IOSDeviceMonitor: ObservableObject {
             case 2: IOSDeviceMonitor.shared.handleDetach(device)
             default: break
             }
-        }, 0, 0, nil, &token)
+        }
 
-        // Battery moves slowly; re-read the attached devices now and then.
+        if let subscribeWithOptions {
+            _ = subscribeWithOptions(callback, 0, 0, nil, &token, options as CFDictionary)
+        } else {
+            _ = subscribe?(callback, 0, 0, nil, &token)
+        }
+
+        // Battery moves slowly; re-read now and then. The sweep also picks up
+        // devices that appeared without a notification.
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.refreshAttached()
         }
@@ -123,6 +152,10 @@ final class IOSDeviceMonitor: ObservableObject {
         }
 
         subscribe = symbol("AMDeviceNotificationSubscribe", as: SubscribeFn.self)
+        subscribeWithOptions = symbol("AMDeviceNotificationSubscribeWithOptions",
+                                      as: SubscribeWithOptionsFn.self)
+        createDeviceList = symbol("AMDCreateDeviceList", as: CreateDeviceListFn.self)
+        interfaceType = symbol("AMDeviceGetInterfaceType", as: InterfaceTypeFn.self)
         connect = symbol("AMDeviceConnect", as: DeviceFn.self)
         disconnect = symbol("AMDeviceDisconnect", as: DeviceFn.self)
         validatePairing = symbol("AMDeviceValidatePairing", as: DeviceFn.self)
@@ -158,6 +191,16 @@ final class IOSDeviceMonitor: ObservableObject {
     }
 
     private func refreshAttached() {
+        // Fold in anything usbmuxd currently knows about, cable or network.
+        if let list = createDeviceList?()?.takeRetainedValue() as? [AnyObject] {
+            for object in list {
+                let device = unsafeBitCast(object, to: DeviceRef.self)
+                if let udid = identifier(of: device), attached[udid] == nil {
+                    attached[udid] = device
+                }
+            }
+        }
+
         var found: [IOSDevice] = []
         for (udid, device) in attached {
             if let reading = read(device, udid: udid) { found.append(reading) }
@@ -191,7 +234,11 @@ final class IOSDeviceMonitor: ObservableObject {
         let product = (value(nil, "ProductType") as? String) ?? "iPhone"
         let charging = (value(battery, "BatteryIsCharging") as? Bool) ?? false
 
+        // 1 = cable, 2 = network.
+        let overWiFi = (interfaceType?(device) ?? 1) == 2
+
         return IOSDevice(udid: udid, name: name, productType: product,
-                         percent: max(0, min(100, raw)), isCharging: charging)
+                         percent: max(0, min(100, raw)), isCharging: charging,
+                         isOverWiFi: overWiFi)
     }
 }

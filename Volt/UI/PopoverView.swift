@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Carries the measured height of the popover's content up to the frame.
+private struct ContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// The panel that drops out of the menu bar: current charge at the top, then
 /// collapsible cards for health, accessories and what is draining the battery.
 struct PopoverView: View {
@@ -9,6 +17,13 @@ struct PopoverView: View {
     @ObservedObject private var battery = BatteryMonitor.shared
     @ObservedObject private var devices = DeviceMonitor.shared
     @ObservedObject private var prefs = Preferences.shared
+
+    /// Measured height of the card column, so the popover is exactly as tall as it
+    /// needs to be and grows as sections are expanded.
+    @State private var contentHeight: CGFloat = 520
+
+    private let minHeight: CGFloat = 320
+    private let maxHeight: CGFloat = 760
 
     @State private var showInfo = true
     @State private var showDevices = true
@@ -30,9 +45,18 @@ struct PopoverView: View {
                 ActionsCard(openSettings: openSettings, quit: quit)
             }
             .padding(12)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(key: ContentHeightKey.self, value: geometry.size.height)
+                }
+            )
         }
-        .frame(width: 408)
-        .frame(maxHeight: 780)
+        .frame(width: 348)
+        .frame(height: min(max(contentHeight, minHeight), maxHeight))
+        .onPreferenceChange(ContentHeightKey.self) { height in
+            guard height > 0 else { return }
+            contentHeight = height
+        }
         .background(Panel.background)
         .environment(\.colorScheme, .dark)
     }
@@ -64,11 +88,11 @@ struct StatusCard: View {
                 HStack(alignment: .top) {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text("\(snapshot.percentage)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(tint)
                         Text("%")
-                            .font(.system(size: 20, weight: .medium, design: .rounded))
+                            .font(.system(size: 17, weight: .medium, design: .rounded))
                             .foregroundStyle(tint.opacity(0.75))
                     }
 
@@ -76,12 +100,12 @@ struct StatusCard: View {
 
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(snapshot.isPluggedIn ? "TIME TO FULL" : "TIME LEFT")
-                            .font(.system(size: 10.5, weight: .semibold))
+                            .font(.system(size: 9.5, weight: .semibold))
                             .tracking(0.6)
                             .foregroundStyle(Panel.secondary)
                         if let shortTime {
                             Text(shortTime)
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(Panel.label)
                         } else {
@@ -97,9 +121,9 @@ struct StatusCard: View {
 
                 HStack(spacing: 8) {
                     BatteryGlyph(level: snapshot.percentage, tint: tint, outlineTint: true)
-                        .frame(width: 32, height: 16)
+                        .frame(width: 26, height: 13)
                     Text(stateText)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Panel.label)
 
                     Spacer()
@@ -111,9 +135,9 @@ struct StatusCard: View {
                 }
 
                 MeterBar(fraction: Double(snapshot.percentage) / 100,
-                         tint: tint, segments: 4, height: 10)
+                         tint: tint, segments: 4, height: 8)
             }
-            .padding(16)
+            .padding(14)
         }
     }
 
@@ -161,10 +185,10 @@ struct InfoCard: View {
                 .sectionDivider()
 
             if isExpanded {
-                healthSection.padding(16).sectionDivider()
-                temperatureSection.padding(16).sectionDivider()
-                powerSection.padding(16).sectionDivider()
-                capacitySection.padding(16)
+                healthSection.padding(14).sectionDivider()
+                temperatureSection.padding(14).sectionDivider()
+                powerSection.padding(14).sectionDivider()
+                capacitySection.padding(14)
             }
         }
     }
@@ -178,14 +202,14 @@ struct InfoCard: View {
                     .font(.system(size: 14))
                     .foregroundStyle(tint)
                 Text("Battery Health")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Panel.label)
                 Spacer()
             }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(health.map { "\($0)%" } ?? "—")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tint)
                 Text(grade)
@@ -196,7 +220,7 @@ struct InfoCard: View {
 
                 VStack(alignment: .trailing, spacing: 0) {
                     Text("\(grouped(snapshot.cycleCount))/1000")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(Panel.label)
                     Text("Cycle Count")
@@ -221,7 +245,7 @@ struct InfoCard: View {
                     .font(.system(size: 14))
                     .foregroundStyle(tint)
                 Text("Temperature")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Panel.label)
                 Spacer()
             }
@@ -229,7 +253,7 @@ struct InfoCard: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(String(format: "%.1f°C", snapshot.temperatureC))
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(tint)
                     Text(String(format: "%.1f°F", snapshot.temperatureC * 9 / 5 + 32))
@@ -263,7 +287,7 @@ struct InfoCard: View {
                     .font(.system(size: 14))
                     .foregroundStyle(Panel.amber)
                 Text("Power & Electrical")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Panel.label)
                 Spacer()
             }
@@ -314,7 +338,7 @@ struct InfoCard: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Panel.blue)
                 Text("Capacity Details")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Panel.label)
                 Spacer()
             }
@@ -347,12 +371,12 @@ struct DevicesCard: View {
                     Text("Nothing reporting a battery yet. Connect AirPods, a Magic Mouse or a keyboard.")
                         .font(.system(size: 11))
                         .foregroundStyle(Panel.secondary)
-                        .padding(16)
+                        .padding(14)
                 } else {
                     VStack(spacing: 10) {
                         ForEach(devices) { DeviceRow(device: $0) }
                     }
-                    .padding(16)
+                    .padding(14)
                 }
             }
         }
@@ -406,7 +430,7 @@ struct EnergyCard: View {
                         }
                     }
                 }
-                .padding(16)
+                .padding(14)
             }
         }
     }
@@ -446,11 +470,11 @@ struct ActionRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 14))
+                .font(.system(size: 13))
                 .foregroundStyle(tint)
-                .frame(width: 20)
+                .frame(width: 18)
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Panel.label)
             Spacer()
             if let trailing {
@@ -463,8 +487,8 @@ struct ActionRow: View {
                     .foregroundStyle(Panel.tertiary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .background(isHovering ? Color.white.opacity(0.05) : .clear)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
