@@ -120,11 +120,6 @@ final class DeviceMonitor: ObservableObject {
             .sink { [weak self] _ in self?.remerge() }
             .store(in: &cancellables)
 
-        BLEBatteryMonitor.shared.$watchReading
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.remerge() }
-            .store(in: &cancellables)
-
         BLEBatteryMonitor.shared.$continuity
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.remerge() }
@@ -172,7 +167,7 @@ final class DeviceMonitor: ObservableObject {
         // only fills whatever is still empty after that.
         let framework = BluetoothFrameworkBattery.read()
         let withExact = lastScan.map { applyFramework($0, framework) }
-        let withAdvertised = applyWatchRelay(to: withExact.map(applyContinuity))
+        let withAdvertised = withExact.map(applyContinuity)
         publish(merge(withAdvertised,
                       withCabled: IOSDeviceMonitor.shared.devices,
                       andBLE: BLEBatteryMonitor.shared.batteries))
@@ -200,34 +195,6 @@ final class DeviceMonitor: ObservableObject {
         // note so the number is not mistaken for live.
         if match.isConnected { exact.note = nil }
         return exact
-    }
-
-    /// Fills in the Apple Watch from the iPhone companion app. The Mac cannot read a
-    /// watch's battery by any route of its own; the watch app reports it to the iPhone,
-    /// which publishes it over the Bluetooth link Volt already holds to the phone.
-    private func applyWatchRelay(to devices: [DeviceBattery]) -> [DeviceBattery] {
-        guard let reading = BLEBatteryMonitor.shared.watchReading else { return devices }
-
-        let age = Date().timeIntervalSince(reading.reportedAt)
-        // The watch reports every quarter hour or so; older than about an hour and the
-        // figure is kept but marked as not current.
-        let current = age < 60 * 60
-        let note: String? = age < 20 * 60 ? nil : Self.ageNote(since: reading.reportedAt)
-
-        var result = devices
-        let entryIndex = result.firstIndex { $0.kind == .watch }
-        var watch = entryIndex.map { result[$0] }
-            ?? DeviceBattery(id: "apple-watch-relay", name: "Apple Watch", kind: .watch,
-                             cells: [], isCharging: false, isConnected: true, note: nil)
-        watch.cells = [.init(label: "", percent: reading.percent)]
-        watch.isConnected = current
-        watch.note = note
-        watch = DeviceBattery(id: watch.id, name: watch.name, kind: .watch, cells: watch.cells,
-                              isCharging: reading.isCharging, isConnected: current, note: note,
-                              model: watch.model)
-
-        if let entryIndex { result[entryIndex] = watch } else { result.append(watch) }
-        return result
     }
 
     /// Fills in a device from its own Continuity broadcast. Only used where macOS
@@ -419,7 +386,7 @@ final class DeviceMonitor: ObservableObject {
         var note: String?
         if cells.isEmpty {
             switch kind {
-            case .watch: note = "Install Volt on your watch and iPhone to see its battery"
+            case .watch: note = "Battery is not published to this Mac"
             case .phone, .tablet: note = "Out of Bluetooth range — bring it nearby"
             default: note = nil   // decided later, once the cache has been consulted
             }

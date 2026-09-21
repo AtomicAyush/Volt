@@ -125,10 +125,11 @@ does not unplug for you.
 
 Some things macOS simply does not expose:
 
-- **Apple Watch battery, on its own.** The Mac cannot read it by any route: the
-  Bluetooth report carries no battery keys for it, it accepts a Bluetooth connection but
-  exposes no battery service, and it does not send the advertisement AirPods use. It is
-  shown through the companion apps instead — see below.
+- **Apple Watch battery.** The Mac cannot read it by any route: the Bluetooth report
+  carries no battery keys for it, it accepts a Bluetooth connection but exposes no
+  battery service, and it does not send the advertisement AirPods use. Relaying it
+  through companion apps on the watch and iPhone works, but a free Apple ID re-signs such
+  apps every seven days, so it is not included.
 - **iPhone / iPad health and cycle count.** `system_profiler` reports nothing for these
   devices, and the health figures live behind `MobileDevice.framework`, which needs the
   device plugged in and trusted at least once.
@@ -191,28 +192,6 @@ for health, cycle count and lifetime stats and does need a cable.
 
 macOS asks for Bluetooth permission the first time Volt scans. If the prompt does not
 appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
-
-## Apple Watch
-
-The watch's battery reaches the Mac through the companion in `Companion/`:
-
-1. **Volt for Apple Watch** reads the watch's own battery and sends it to the iPhone over
-   WatchConnectivity — whenever the app is opened, and in the background roughly every
-   fifteen minutes, as often as watchOS allows.
-2. **Volt for iPhone** receives it and publishes it as a custom Bluetooth LE value
-   (service `6B1F0001-…`). It declares the `bluetooth-peripheral` background mode so iOS
-   keeps serving the value while the app is in the background.
-3. **Volt on the Mac** already holds a Bluetooth connection to the iPhone for the phone's
-   own battery, and reads the relayed value over that same link. No network, no cloud.
-
-The value is six bytes: percent, flags (charging, full), and the time the watch took the
-reading, so the Mac can tell a fresh figure from a stale one.
-
-To install, open `Companion/VoltCompanion.xcodeproj`, select your team under Signing &
-Capabilities for both targets, connect your iPhone, and run the `VoltCompanion` scheme on
-it; the watch app installs with it. Open Volt once on the watch and once on the iPhone.
-Developer Mode has to be on for both devices, and a free Apple ID signs apps for seven
-days at a time.
 
 ## How it reads the battery
 
