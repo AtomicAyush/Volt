@@ -55,6 +55,12 @@ struct DeviceBattery: Identifiable, Equatable {
     let isConnected: Bool
     /// Shown in place of a level when macOS exposes no battery for this device.
     var note: String?
+    /// Apple model number from the Bluetooth report, used to match this device against
+    /// the Continuity advertisements it broadcasts.
+    var model: UInt16?
+    /// True when the level came from a Continuity advertisement, which reports in
+    /// steps of ten rather than exactly.
+    var isApproximate: Bool = false
 
     /// The cell most at risk — what alerts and the sort order key off.
     var lowestPercent: Int { cells.map(\.percent).min() ?? 100 }

@@ -102,6 +102,30 @@ Some things macOS simply does not expose:
 
 Also not built: desktop widgets, and auto-dismissing macOS's own low-battery popups.
 
+## AirPods
+
+macOS stops publishing a battery level for some accessories once they are actually
+connected — AirPods Max report one while idle and nothing at all while in use — and they
+do not expose the standard Bluetooth battery service either, which a GATT connection
+confirms.
+
+What they do broadcast is Apple's undocumented "proximity pairing" advertisement, which
+carries the levels as nibbles counting tens. The layout in `ContinuityDecoder` was
+written against captured bytes and checked against levels macOS reports for the same
+device: a pair whose real levels were 91% / 91% / 78% decoded as 90% / 90% / 80%, which
+is the format's resolution.
+
+The hard part is attribution. The advertisement carries a model number but no stable
+identifier — the address is randomised and the rest of the payload encrypted — so a
+neighbour's AirPods of the same model look identical to yours. Readings are only
+accepted for models paired to this Mac, only from the closest broadcaster of that model,
+and only above a signal threshold. They also never replace a level macOS reports, since
+that one is exact and complete; a decoded level is rounded and can be missing a pod.
+Rounded values are shown with a `~`.
+
+Anything still without a level is listed with the reason rather than hidden, and the
+last level seen is remembered so a device that stops reporting keeps its number.
+
 ## iPhone and iPad
 
 The live percentage comes from Bluetooth. An iPhone or iPad exposes the standard GATT

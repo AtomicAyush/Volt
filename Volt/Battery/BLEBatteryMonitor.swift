@@ -46,6 +46,20 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     /// without having to rediscover the device by scanning.
     private var knownIdentifiers: Set<UUID> = []
 
+    /// Strongest Continuity reading seen for each model, keyed by model number.
+    private var continuityByModel: [UInt16: ContinuityReading] = [:]
+
+    /// Model numbers of devices actually paired to this Mac, supplied by DeviceMonitor.
+    /// Without this the decoder would happily report a stranger's AirPods.
+    var pairedModels: Set<UInt16> = []
+
+    /// Readings for paired models only, as name-less values keyed by model.
+    @Published private(set) var continuity: [UInt16: ContinuityReading] = [:]
+
+    /// How close a broadcaster has to be before its reading is trusted. Anything
+    /// fainter is more likely to be someone else's.
+    private static let minimumRSSI = -70
+
     private var knownStoreURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Volt", isDirectory: true)
@@ -151,7 +165,10 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         let name = ((advertisement[CBAdvertisementDataLocalNameKey] as? String)
                     ?? peripheral.name ?? "").lowercased()
         guard !name.isEmpty else { return false }
-        return ["iphone", "ipad", "ipod"].contains { name.contains($0) }
+        // AirPods are worth a try: macOS stops reporting their level through the
+        // Bluetooth report once they are connected, so if they happen to expose the
+        // standard battery service it is the only live figure available.
+        return ["iphone", "ipad", "ipod", "airpods"].contains { name.contains($0) }
     }
 
     private func adopt(_ peripheral: CBPeripheral) {
@@ -221,8 +238,28 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        captureAdvertisement(peripheral, advertisementData, rssi: RSSI)
         guard isCandidate(peripheral, advertisement: advertisementData) else { return }
         adopt(peripheral)
+    }
+
+    private func captureAdvertisement(_ peripheral: CBPeripheral,
+                                      _ advertisement: [String: Any], rssi: NSNumber) {
+        guard let data = advertisement[CBAdvertisementDataManufacturerDataKey] as? Data,
+              let reading = ContinuityDecoder.decode(manufacturerData: data,
+                                                     rssi: rssi.intValue) else { return }
+
+        guard pairedModels.contains(reading.model),
+              reading.rssi >= Self.minimumRSSI else { return }
+
+        // Keep the closest broadcaster of each model.
+        if let existing = continuityByModel[reading.model],
+           existing.rssi > reading.rssi,
+           Date().timeIntervalSince(existing.seen) < 60 {
+            return
+        }
+        continuityByModel[reading.model] = reading
+        continuity = continuityByModel
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

@@ -55,6 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lines.append("bluetooth state=\(ble.state.rawValue) ble=\(ble.batteries.map { "\($0.name):\($0.percent)%" })")
             lines.append("cabled=\(IOSDeviceMonitor.shared.devices.map { "\($0.name):\($0.percent)%" })")
             lines.append("tracked(known \(ble.knownCount)): \(ble.trackedSummary)")
+            for (model, r) in ble.continuity.sorted(by: { $0.key < $1.key }) {
+                lines.append(String(format: "  continuity 0x%04x: %@/%@/%@ rssi=%d",
+                                    model,
+                                    r.primary.map { "\($0)%" } ?? "-",
+                                    r.secondary.map { "\($0)%" } ?? "-",
+                                    r.caseLevel.map { "\($0)%" } ?? "-",
+                                    r.rssi))
+            }
             for d in DeviceMonitor.shared.devices {
                 lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent)) note=\(d.note ?? "-")")
             }

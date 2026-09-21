@@ -17,11 +17,88 @@ final class DeviceMonitor: ObservableObject {
     private let queue = DispatchQueue(label: "volt.devices", qos: .utility)
     private var isRefreshing = false
     private var cancellables = Set<AnyCancellable>()
+
+    /// Last battery reading seen for each device, so a device that stops reporting
+    /// still shows a number. macOS drops the battery keys for some accessories once
+    /// they are actually connected — AirPods Max report a level while disconnected and
+    /// nothing at all once in use — and hiding them at that point is the worst answer.
+    private var lastKnown: [String: (cells: [DeviceBattery.Cell], seen: Date)] = [:]
     /// The most recent Bluetooth/HID scan, kept so a cable event can be merged in
     /// without waiting for the next (slow) system_profiler run.
     private var lastScan: [DeviceBattery] = []
 
-    private init() {}
+    private init() { loadCache() }
+
+    private var cacheURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Volt", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("device-levels.json")
+    }
+
+    private struct CachedReading: Codable {
+        var labels: [String]
+        var percents: [Int]
+        var seen: Date
+    }
+
+    private func loadCache() {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let decoded = try? JSONDecoder().decode([String: CachedReading].self, from: data)
+        else { return }
+        for (id, entry) in decoded {
+            let cells = zip(entry.labels, entry.percents).map {
+                DeviceBattery.Cell(label: $0, percent: $1)
+            }
+            lastKnown[id] = (cells, entry.seen)
+        }
+    }
+
+    private func saveCache() {
+        let payload = lastKnown.mapValues {
+            CachedReading(labels: $0.cells.map(\.label),
+                          percents: $0.cells.map(\.percent),
+                          seen: $0.seen)
+        }
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
+    }
+
+    /// Fills in a device whose current report carries no battery, and records one that
+    /// does. Returns nil only when there is nothing useful to show at all.
+    private func applyCache(to device: DeviceBattery) -> DeviceBattery? {
+        if device.hasReading {
+            lastKnown[device.id] = (device.cells, Date())
+            saveCache()
+            return device
+        }
+
+        if let remembered = lastKnown[device.id] {
+            var filled = device
+            filled = DeviceBattery(id: device.id, name: device.name, kind: device.kind,
+                                   cells: remembered.cells, isCharging: false,
+                                   isConnected: false,
+                                   note: Self.ageNote(since: remembered.seen))
+            return filled
+        }
+
+        // Nothing remembered. A connected device is still worth listing, with the
+        // reason it has no number; a disconnected one with no history is not.
+        guard device.isConnected || device.note != nil else { return nil }
+        var plain = device
+        if plain.note == nil { plain.note = "Battery not reported over Bluetooth" }
+        return plain
+    }
+
+    private static func ageNote(since date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        switch seconds {
+        case ..<120: return "Last reported just now"
+        case ..<3600: return "Last reported \(seconds / 60) min ago"
+        case ..<86400: return "Last reported \(seconds / 3600) h ago"
+        default: return "Last reported \(seconds / 86400) d ago"
+        }
+    }
 
     func start(interval: TimeInterval = 60) {
         IOSDeviceMonitor.shared.$devices
@@ -30,6 +107,11 @@ final class DeviceMonitor: ObservableObject {
             .store(in: &cancellables)
 
         BLEBatteryMonitor.shared.$batteries
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.remerge() }
+            .store(in: &cancellables)
+
+        BLEBatteryMonitor.shared.$continuity
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.remerge() }
             .store(in: &cancellables)
@@ -49,16 +131,52 @@ final class DeviceMonitor: ObservableObject {
         queue.async {
             let found = Self.scanBluetooth() + Self.scanAppleHID()
             DispatchQueue.main.async {
-                self.lastScan = found
+                // Tell the decoder which models belong to this Mac, so a neighbour's
+                // AirPods of the same kind are never mistaken for the user's.
+                BLEBatteryMonitor.shared.pairedModels = Set(found.compactMap(\.model))
+                self.lastScan = found.compactMap { self.applyCache(to: $0) }
                 self.remerge()
             }
         }
     }
 
     private func remerge() {
-        publish(merge(lastScan,
+        let withAdvertised = lastScan.map(applyContinuity)
+        publish(merge(withAdvertised,
                       withCabled: IOSDeviceMonitor.shared.devices,
                       andBLE: BLEBatteryMonitor.shared.batteries))
+    }
+
+    /// Fills in a device from its own Continuity broadcast. Only used where macOS
+    /// reports nothing — an exact level always wins over a rounded one.
+    private func applyContinuity(_ device: DeviceBattery) -> DeviceBattery {
+        // Only ever fills a gap. A level macOS reports is exact and complete; a
+        // decoded one is rounded to ten and can be missing a pod, so it must not
+        // replace one.
+        guard !device.hasReading,
+              let model = device.model,
+              let reading = BLEBatteryMonitor.shared.continuity[model],
+              Date().timeIntervalSince(reading.seen) < 300 else { return device }
+
+        var cells: [DeviceBattery.Cell] = []
+        switch device.kind {
+        case .earbuds:
+            if let left = reading.primary { cells.append(.init(label: "L", percent: left)) }
+            if let right = reading.secondary { cells.append(.init(label: "R", percent: right)) }
+            if let box = reading.caseLevel { cells.append(.init(label: "Case", percent: box)) }
+        default:
+            // A single unit reports in one of the two pod nibbles. The case nibble is
+            // deliberately ignored here: headphones have no case, and that field reads
+            // as a constant for devices that lack one.
+            if let level = reading.primary ?? reading.secondary {
+                cells.append(.init(label: "", percent: level))
+            }
+        }
+        guard !cells.isEmpty else { return device }
+
+        return DeviceBattery(id: device.id, name: device.name, kind: device.kind,
+                             cells: cells, isCharging: false, isConnected: true,
+                             note: nil, model: device.model, isApproximate: true)
     }
 
     /// A real reading replaces the placeholder for the same device. Names differ
@@ -179,10 +297,18 @@ final class DeviceMonitor: ObservableObject {
         // hiding the device.
         var note: String?
         if cells.isEmpty {
-            guard [.phone, .tablet, .watch].contains(kind) else { return nil }
-            note = kind == .watch
-                ? "Battery is not published to this Mac"
-                : "Out of Bluetooth range — bring it nearby"
+            switch kind {
+            case .watch: note = "Battery is not published to this Mac"
+            case .phone, .tablet: note = "Out of Bluetooth range — bring it nearby"
+            default: note = nil   // decided later, once the cache has been consulted
+            }
+        }
+
+        // "0x202D" in the report; kept so Continuity advertisements can be matched.
+        var model: UInt16?
+        if let raw = info["device_productID"] as? String {
+            let digits = raw.hasPrefix("0x") ? String(raw.dropFirst(2)) : raw
+            model = UInt16(digits, radix: 16)
         }
 
         let address = (info["device_address"] as? String) ?? name
@@ -193,7 +319,8 @@ final class DeviceMonitor: ObservableObject {
             cells: cells,
             isCharging: false,
             isConnected: connected,
-            note: note
+            note: note,
+            model: model
         )
     }
 
