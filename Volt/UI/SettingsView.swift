@@ -365,10 +365,34 @@ struct DeviceSettings: View {
 
 struct GeneralSettings: View {
     @ObservedObject private var prefs = Preferences.shared
+    @ObservedObject private var helper = HelperClient.shared
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var helperError: String?
 
     var body: some View {
         Form {
+            Section {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Low Power Mode helper")
+                        Text(helperStatusText)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(helper.isReady ? .green
+                                             : (helper.needsApproval ? .orange : .secondary))
+                    }
+                    Spacer()
+                    helperButton
+                }
+                Text("A small helper that runs as administrator so the Low Power Mode switch works without a password prompt each time. It can only switch Low Power Mode on or off, only accepts requests from Volt, and is started by macOS when needed and exits when idle.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                if let helperError {
+                    Text(helperError).font(.system(size: 10)).foregroundStyle(.red)
+                }
+            } header: {
+                Text("Low Power Mode").font(.system(size: 12, weight: .semibold))
+            }
+
             Section {
                 Toggle("Open Volt at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
@@ -406,6 +430,37 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension GeneralSettings {
+    fileprivate var helperStatusText: String {
+        switch helper.status {
+        case .enabled: return "Installed — the switch works without prompting"
+        case .requiresApproval: return "Waiting for approval in System Settings › Login Items"
+        case .notFound: return "Not found in this build — reinstall with install.sh"
+        default: return "Not installed — the switch asks for a password each time"
+        }
+    }
+
+    @ViewBuilder
+    fileprivate var helperButton: some View {
+        switch helper.status {
+        case .enabled:
+            Button("Remove") { helper.uninstall() }
+        case .requiresApproval:
+            Button("Approve…") { helper.openApprovalSettings() }
+        default:
+            Button("Install") {
+                do {
+                    try helper.install()
+                    helperError = nil
+                    if helper.needsApproval { helper.openApprovalSettings() }
+                } catch {
+                    helperError = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

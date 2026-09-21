@@ -48,11 +48,11 @@ struct DeviceBattery: Identifiable, Equatable {
     let id: String            // bluetooth address, or a stable synthetic key
     let name: String
     let kind: Kind
-    let cells: [Cell]
+    var cells: [Cell]
     let isCharging: Bool
     /// False for a paired device that is not currently connected: the levels are the
     /// last ones macOS saw, so they are shown dimmed and never trigger alerts.
-    let isConnected: Bool
+    var isConnected: Bool
     /// Shown in place of a level when macOS exposes no battery for this device.
     var note: String?
     /// Apple model number from the Bluetooth report, used to match this device against

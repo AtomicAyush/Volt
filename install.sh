@@ -27,7 +27,13 @@ APP=$(xcodebuild -project Volt.xcodeproj -scheme Volt -configuration Release \
     -showBuildSettings 2>/dev/null | awk -F' = ' '/ BUILT_PRODUCTS_DIR /{print $2}')/Volt.app
 
 echo "Signing with ${IDENTITY}…"
-codesign --force --deep --sign "$IDENTITY" "$APP"
+# The helper first, under its own identifier. --deep on the app would re-sign it
+# under its file name, which the app's check on the helper would then reject.
+if [ -f "$APP/Contents/MacOS/VoltHelper" ]; then
+    codesign --force --sign "$IDENTITY" -i com.ayush.Volt.helper --options runtime \
+        "$APP/Contents/MacOS/VoltHelper"
+fi
+codesign --force --sign "$IDENTITY" "$APP"
 
 pkill -x Volt 2>/dev/null || true
 sleep 1

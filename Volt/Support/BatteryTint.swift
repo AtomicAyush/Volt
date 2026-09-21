@@ -11,6 +11,9 @@ enum BatteryTint {
     /// colour takes over. Above every configured level there is nothing user-defined
     /// to go on, so a default scale is used.
     static func color(percentage: Int, charging: Bool) -> AlertColor {
+        // Low Power Mode turns the battery yellow, as macOS's own indicator does. It
+        // outranks everything else: it is a mode the user chose and should always see.
+        if LowPowerMode.shared.isEnabled { return .yellow }
         if charging { return .green }
 
         let triggered = Preferences.shared.levelAlerts

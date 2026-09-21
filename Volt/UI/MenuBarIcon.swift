@@ -72,7 +72,12 @@ enum MenuBarIcon {
 
         // A brighter shell than the other styles use: the numbered icon is busier, so
         // the outline has to hold it together.
-        let outlineColor = NSColor.labelColor.withAlphaComponent(showNumber ? 0.7 : 0.45)
+        // Low Power Mode outlines the shell in yellow as well as filling it, so it stays
+        // recognisable even when an alert the user coloured yellow is also in effect.
+        let lowPower = LowPowerMode.shared.isEnabled
+        let outlineColor = lowPower
+            ? AlertColor.yellow.nsColor
+            : NSColor.labelColor.withAlphaComponent(showNumber ? 0.7 : 0.45)
         let fill = showNumber && colored
             ? levelColor(for: snapshot.percentage, charging: snapshot.isCharging)
             : fillColor(for: snapshot.percentage, charging: snapshot.isCharging, colored: colored)

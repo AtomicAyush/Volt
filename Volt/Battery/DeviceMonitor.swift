@@ -163,10 +163,38 @@ final class DeviceMonitor: ObservableObject {
     }
 
     private func remerge() {
-        let withAdvertised = lastScan.map(applyContinuity)
+        // Exact levels from the Bluetooth framework first; the rounded broadcast decode
+        // only fills whatever is still empty after that.
+        let framework = BluetoothFrameworkBattery.read()
+        let withExact = lastScan.map { applyFramework($0, framework) }
+        let withAdvertised = withExact.map(applyContinuity)
         publish(merge(withAdvertised,
                       withCabled: IOSDeviceMonitor.shared.devices,
                       andBLE: BLEBatteryMonitor.shared.batteries))
+    }
+
+    /// Fills in a device from IOBluetooth, matching on address first and, since the
+    /// framework and the report can name the same device differently ("AirPods Max"
+    /// against "Ayush's AirPods Max"), on name as a fallback.
+    private func applyFramework(_ device: DeviceBattery,
+                                _ framework: [String: BluetoothFrameworkBattery.Reading]) -> DeviceBattery {
+        guard !device.hasReading || !device.isConnected else { return device }
+
+        let byAddress = framework[BluetoothFrameworkBattery.normalise(device.id)]
+        let byName = framework.values.first {
+            let a = Self.nameKey($0.name), b = Self.nameKey(device.name)
+            return !a.isEmpty && (a == b || b.hasSuffix(a))
+        }
+        guard let match = byAddress ?? byName else { return device }
+
+        var exact = device
+        exact.cells = match.cells
+        exact.isApproximate = false
+        exact.isConnected = match.isConnected
+        // A connected device's figure is current; an off one keeps its "last reported"
+        // note so the number is not mistaken for live.
+        if match.isConnected { exact.note = nil }
+        return exact
     }
 
     /// Fills in a device from its own Continuity broadcast. Only used where macOS

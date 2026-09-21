@@ -113,6 +113,7 @@ struct PopoverView: View {
 
 struct StatusCard: View {
     let snapshot: BatterySnapshot
+    @ObservedObject private var lowPower = LowPowerMode.shared
 
     private var tint: Color {
         BatteryTint.swiftUIColor(percentage: snapshot.percentage, charging: snapshot.isCharging)
@@ -185,6 +186,17 @@ struct StatusCard: View {
                                 Capsule().fill(tint.opacity(0.16))
                             }
                         }
+
+                    if lowPower.isEnabled {
+                        HStack(spacing: 3) {
+                            Image(systemName: "leaf.fill").font(.system(size: 9))
+                            Text("Low Power").font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(AlertColor.yellow.color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(AlertColor.yellow.color.opacity(0.16)))
+                    }
 
                     Spacer()
 
@@ -511,6 +523,7 @@ struct ActionsCard: View {
 /// password or Touch ID, because macOS only lets root change it.
 struct LowPowerRow: View {
     @ObservedObject var lowPower: LowPowerMode
+    @ObservedObject private var helper = HelperClient.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -537,10 +550,21 @@ struct LowPowerRow: View {
                     .font(.system(size: 10))
                     .foregroundStyle(Panel.red)
                     .padding(.leading, 28)
+            } else if helper.needsApproval {
+                Button {
+                    helper.openApprovalSettings()
+                } label: {
+                    Text("Approve Volt in Login Items to switch without a password ›")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Panel.amber)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 28)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+        .onAppear { helper.refreshStatus() }
     }
 }
 

@@ -51,6 +51,7 @@
 				V0170000000000000000009 /* Sources */,
 				V0170000000000000000010 /* Frameworks */,
 				V0170000000000000000011 /* Resources */,
+				V0170000000000000000012 /* Embed Low Power helper */,
 			);
 			buildRules = (
 			);
@@ -107,6 +108,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		V0170000000000000000012 /* Embed Low Power helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Low Power helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			showEnvVarsInLog = 0;
+			shellScript = "set -e\n# Builds the privileged Low Power Mode helper and embeds it with its launchd plist.\n# It lives outside the synchronised Volt folder so it is not compiled into the app.\nHELPER_SRC=\"$SRCROOT/VoltHelper\"\nOUT_BIN=\"$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/VoltHelper\"\nmkdir -p \"$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH\"\nxcrun swiftc -O -target arm64-apple-macos14.0 -sdk \"$SDKROOT\" \"$HELPER_SRC/main.swift\" -o \"$OUT_BIN\"\nDAEMONS=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LaunchDaemons\"\nmkdir -p \"$DAEMONS\"\ncp \"$HELPER_SRC/com.ayush.Volt.helper.plist\" \"$DAEMONS/\"\nif [ \"$CODE_SIGNING_ALLOWED\" = \"YES\" ]; then\n  codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" -i com.ayush.Volt.helper \"$OUT_BIN\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		V0170000000000000000009 /* Sources */ = {
@@ -177,6 +201,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Volt reads the battery level of your iPhone, iPad and accessories over Bluetooth.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -206,6 +231,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Volt reads the battery level of your iPhone, iPad and accessories over Bluetooth.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

@@ -94,14 +94,28 @@ any wallpaper.
 
 ## Low Power Mode
 
-A switch in the panel turns macOS Low Power Mode on and off. Reading the state is free —
-`ProcessInfo` reports it and posts a notification when it changes, whoever changed it.
-Changing it is `pmset powermode`, which only root may do.
+A switch in the panel turns macOS Low Power Mode on and off, and while it is on the
+battery icon turns yellow — fill and outline both, so it cannot be confused with an
+alert that happens to be yellow — and the panel says so.
 
-There are two ways to get root. A privileged helper daemon runs as root permanently so
-the switch can flip silently — which means installing a root process for the sake of one
-toggle. Volt uses the other: the system's own administrator prompt, which accepts Touch
-ID and leaves nothing privileged installed. The cost is a prompt each time you switch.
+Reading the state is free: `ProcessInfo` reports it and posts a notification whenever it
+changes. Changing it is `pmset powermode`, which only root may run, so it goes through
+**VoltHelper**, a small launchd daemon registered with `SMAppService`. macOS asks you to
+approve it once under System Settings › General › Login Items; after that the switch
+works without a prompt. Until then — or if the helper stops answering — it falls back to
+the administrator prompt.
+
+Because the helper runs as root, it is kept narrow:
+
+- It does one thing, setting `powermode` to 0 or 1. Its only input is a Bool; it never
+  runs a command it was handed.
+- It only accepts connections from Volt signed by the same team as itself, and refuses
+  everything if it cannot establish its own team. Volt, in turn, only trusts a helper
+  signed by its own team. An ad-hoc re-signed copy of Volt was checked and is rejected.
+- It is not resident. launchd starts it when Volt connects and it exits after twenty
+  idle seconds.
+
+Remove it from Settings › General at any time.
 
 ## What it does not do
 
@@ -141,6 +155,10 @@ accepted for models paired to this Mac, only from the closest broadcaster of tha
 and only above a signal threshold. They also never replace a level macOS reports, since
 that one is exact and complete; a decoded level is rounded and can be missing a pod.
 Rounded values are shown with a `~`.
+
+Exact levels come first from IOBluetooth, which still holds them after macOS stops
+putting them in its report — the same figures the Sound menu shows, behind properties
+that are not in the public headers. The broadcast decode only fills what is still empty.
 
 Anything still without a level is listed with the reason rather than hidden, and the
 last level seen is remembered so a device that stops reporting keeps its number. The

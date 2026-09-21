@@ -108,7 +108,9 @@ struct LevelAlert: Codable, Identifiable, Equatable {
         case ..<8: return .red
         case ..<15: return .orange
         case ..<35: return .amber
-        default: return .yellow
+        // Not yellow: that is Low Power Mode's colour, and a default alert colour that
+        // matched it would make the mode impossible to spot.
+        default: return .lime
         }
     }
 }

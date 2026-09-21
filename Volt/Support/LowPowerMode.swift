@@ -6,10 +6,9 @@ import Combine
 /// Reading is free: `ProcessInfo` reports it and posts a notification when it changes,
 /// whoever changed it. Writing is not — it is `pmset powermode`, which needs root.
 ///
-/// There are two ways to get root. A privileged helper daemon runs permanently as root
-/// so the switch can flip silently; that is a root process installed on the machine for
-/// the sake of one toggle. The alternative, used here, is the system's own
-/// administrator prompt, which accepts Touch ID and leaves nothing privileged behind.
+/// The switch goes through VoltHelper, a root daemon that exists to do only this, so it
+/// flips without a prompt. Until the helper is installed and approved, it falls back to
+/// the system's administrator prompt, and the first use kicks off the installation.
 final class LowPowerMode: ObservableObject {
     static let shared = LowPowerMode()
 
@@ -33,6 +32,34 @@ final class LowPowerMode: ObservableObject {
         isChanging = true
         lastError = nil
 
+        let helper = HelperClient.shared
+        helper.refreshStatus()
+
+        if helper.isReady {
+            helper.setLowPowerMode(enabled) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.isChanging = false
+                    self.isEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+                case .failure:
+                    // The helper is registered but not answering — maybe mid-update.
+                    // Fall back rather than leave the switch dead.
+                    self.setWithPrompt(enabled)
+                }
+            }
+            return
+        }
+
+        // First use: register the helper so later switches are silent, and use the
+        // prompt for this one.
+        if helper.status == .notRegistered || helper.status == .notFound {
+            try? helper.install()
+        }
+        setWithPrompt(enabled)
+    }
+
+    private func setWithPrompt(_ enabled: Bool) {
         let mode = enabled ? 1 : 0
         let source = """
         do shell script "/usr/bin/pmset -a powermode \(mode)" with administrator privileges
@@ -56,4 +83,10 @@ final class LowPowerMode: ObservableObject {
     }
 
     func toggle() { set(!isEnabled) }
+
+    #if DEBUG
+    /// Lets previews and render checks show the Low Power look without changing the
+    /// real setting.
+    func overrideForPreview(_ enabled: Bool) { isEnabled = enabled }
+    #endif
 }

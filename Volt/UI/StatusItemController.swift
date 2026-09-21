@@ -44,6 +44,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         .sink { [weak self] in self?.render(BatteryMonitor.shared.snapshot) }
         .store(in: &cancellables)
 
+        LowPowerMode.shared.$isEnabled
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.render(BatteryMonitor.shared.snapshot) }
+            .store(in: &cancellables)
+
         render(BatteryMonitor.shared.snapshot)
     }
 
@@ -64,6 +69,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
 
         var tooltip = "\(snapshot.percentage)% · \(snapshot.timeRemainingText)"
+        if LowPowerMode.shared.isEnabled { tooltip += " · Low Power Mode" }
         if let health = snapshot.healthPercent {
             tooltip += String(format: "\nHealth %.0f%% · %d cycles", health, snapshot.cycleCount)
         }
