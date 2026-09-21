@@ -85,6 +85,8 @@ final class BatteryMonitor: ObservableObject {
         new.condition = snapshot.condition
         new.appleMaxCapacity = snapshot.appleMaxCapacity
         applyPowerSourceInfo(to: &new)
+        applyFastChargingState(to: &new)
+        estimateTimeIfNeeded(for: &new)
         new.updated = Date()
 
         guard new != snapshot else { return }
@@ -144,6 +146,10 @@ final class BatteryMonitor: ObservableObject {
             s.adapterPower = data["AdapterPower"] as? Double
             s.systemPower = data["SystemPower"] as? Double
         }
+        if let telemetry = props["PowerTelemetryData"] as? [String: Any],
+           let lossMilliwatts = telemetry["AdapterEfficiencyLoss"] as? Int {
+            s.conversionLoss = Double(lossMilliwatts) / 1000
+        }
 
         applySMC(to: &s)
         return s
@@ -175,6 +181,38 @@ final class BatteryMonitor: ObservableObject {
         return minutes
     }
 
+    /// The registry's charging flag can take many seconds to flip after plugging in — the
+    /// alert fired at once but the panel kept saying "Plugged in" at +0.5 W. A pack taking
+    /// real current while on AC is charging, whatever the flag says yet.
+    private func applyFastChargingState(to s: inout BatterySnapshot) {
+        if s.isPluggedIn, s.amperage > 0.1 { s.isCharging = true }
+        if !s.isPluggedIn { s.isCharging = false }
+    }
+
+    /// Smoothed current, so a time estimate does not jump every second with the load.
+    private var smoothedAmperage: Double?
+
+    /// The gauge's own estimate is missing for a while after the power state changes.
+    /// In that gap, work one out from the charge left to gain or lose and the smoothed
+    /// current, so the panel says something better than "Estimating".
+    private func estimateTimeIfNeeded(for s: inout BatterySnapshot) {
+        let amps = s.amperage
+        if let previous = smoothedAmperage, (previous > 0) == (amps > 0) {
+            smoothedAmperage = previous * 0.8 + amps * 0.2
+        } else {
+            smoothedAmperage = amps       // direction changed: start again
+        }
+        guard s.minutesRemaining == nil, let current = smoothedAmperage,
+              abs(current) > 0.05, s.rawMaxCapacity > 0 else { return }
+
+        let milliampHours = s.isCharging
+            ? Double(max(0, s.rawMaxCapacity - s.rawCurrentCapacity))
+            : Double(s.rawCurrentCapacity)
+        guard (s.isCharging && current > 0) || (!s.isCharging && current < 0) else { return }
+        let minutes = milliampHours / (abs(current) * 1000) * 60
+        s.minutesRemaining = Self.sanitize(Int(minutes.rounded()))
+    }
+
     /// IOPowerSources knows a few things the raw registry does not, and agrees with `pmset`.
     private func applyPowerSourceInfo(to s: inout BatterySnapshot) {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
@@ -192,6 +230,14 @@ final class BatteryMonitor: ObservableObject {
             }
             if let health = desc[kIOPSBatteryHealthKey] as? String, s.condition == nil {
                 s.condition = health
+            }
+            // IOPowerSources flips on the change notification itself, well ahead of the
+            // registry, so it decides plugged in and charging.
+            if let state = desc[kIOPSPowerSourceStateKey] as? String {
+                s.isPluggedIn = state == kIOPSACPowerValue
+            }
+            if let charging = desc[kIOPSIsChargingKey] as? Bool, charging {
+                s.isCharging = true
             }
             if s.minutesRemaining == nil {
                 let key = s.isPluggedIn ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey

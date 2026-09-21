@@ -29,8 +29,12 @@ struct BatterySnapshot: Equatable {
     var adapterPower: Double?
     /// What the Mac itself is drawing, separate from what goes into the battery.
     var systemPower: Double?
-    /// Power in or out of the pack, straight from the controller.
+    /// Power in or out of the pack, straight from the controller. Only meaningful on
+    /// battery: it measures discharge and reads under a watt while charging at sixty.
     var batteryPower: Double?
+    /// Watts lost converting the adapter's supply, which belong to neither the battery
+    /// nor the Mac.
+    var conversionLoss: Double?
 
     /// "Normal", "Service Recommended", ... as reported by macOS.
     var condition: String?
@@ -46,12 +50,10 @@ struct BatterySnapshot: Equatable {
     }
 
     /// Instantaneous power flow in watts. Positive = charging, negative = draining.
-    /// The controller's own figure is preferred where available, since it is measured
-    /// rather than multiplied out, but its sign comes from the current.
-    var watts: Double {
-        guard let batteryPower, batteryPower > 0 else { return voltage * amperage }
-        return amperage < 0 ? -batteryPower : batteryPower
-    }
+    /// Voltage times current, both from the SMC at about a second's resolution. The
+    /// controller's own battery-power key is not used: it only measures discharge, and
+    /// read 0.6 W while the pack was taking 58.
+    var watts: Double { voltage * amperage }
 
     /// Power going into the battery right now; zero when it is not charging.
     var chargePower: Double { max(0, watts) }
@@ -61,9 +63,15 @@ struct BatterySnapshot: Equatable {
     /// On battery that is simply the discharge: everything leaving the pack is running
     /// the Mac. Plugged in it is whatever the adapter delivers beyond what the battery
     /// is taking.
+    ///
+    /// Checked against the gauge: 86 W in, 58 W into the pack and 2.6 W lost converting
+    /// leaves 25.4 W, which is exactly the system draw it reports — but that figure lags,
+    /// whereas this one moves with the live readings.
     var load: Double {
         guard isPluggedIn else { return abs(min(0, watts)) }
-        if let adapterPower, adapterPower > 0 { return max(0, adapterPower - chargePower) }
+        if let adapterPower, adapterPower > 0 {
+            return max(0, adapterPower - chargePower - (conversionLoss ?? 0))
+        }
         if let systemPower, systemPower > 0 { return systemPower }
         return abs(min(0, watts))
     }
