@@ -19,16 +19,23 @@ final class BatteryMonitor: ObservableObject {
     private var runLoopSource: CFRunLoopSource?
     private var timer: Timer?
     private var lastProfilerRefresh: Date = .distantPast
+    private var interestNotification: io_object_t = IO_OBJECT_NULL
+    private var notifyPort: IONotificationPortRef?
 
     private init() {}
 
     func start() {
         refresh()
         installPowerSourceNotification()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        installBatteryInterestNotification()
+
+        // The registry republishes on its own schedule — sometimes seconds apart,
+        // sometimes not. The interest notification above catches each republish as it
+        // happens; this is only a floor under it.
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refresh()
         }
-        timer?.tolerance = 1
+        timer?.tolerance = 0.5
         refreshSystemProfilerFacts()
     }
 
@@ -39,6 +46,35 @@ final class BatteryMonitor: ObservableObject {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
             runLoopSource = nil
         }
+        if interestNotification != IO_OBJECT_NULL {
+            IOObjectRelease(interestNotification)
+            interestNotification = IO_OBJECT_NULL
+        }
+        if let notifyPort {
+            IONotificationPortDestroy(notifyPort)
+            self.notifyPort = nil
+        }
+    }
+
+    /// Fires whenever AppleSmartBattery republishes its properties, which is when new
+    /// current and voltage readings actually land. Polling alone either lags behind
+    /// this or samples the same values repeatedly.
+    private func installBatteryInterestNotification() {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                  IOServiceMatching("AppleSmartBattery"))
+        guard service != IO_OBJECT_NULL else { return }
+        defer { IOObjectRelease(service) }
+
+        guard let port = IONotificationPortCreate(kIOMainPortDefault) else { return }
+        notifyPort = port
+        IONotificationPortSetDispatchQueue(port, .main)
+
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        IOServiceAddInterestNotification(port, service, kIOGeneralInterest, { ctx, _, _, _ in
+            guard let ctx else { return }
+            let monitor = Unmanaged<BatteryMonitor>.fromOpaque(ctx).takeUnretainedValue()
+            monitor.refresh()
+        }, context, &interestNotification)
     }
 
     // MARK: - Reading
@@ -99,6 +135,14 @@ final class BatteryMonitor: ObservableObject {
         if let adapter = props["AdapterDetails"] as? [String: Any] {
             s.adapterWatts = adapter["Watts"] as? Int
             s.adapterName = (adapter["Name"] as? String) ?? (adapter["Description"] as? String)
+        }
+
+        // The gauge publishes both sides of the power split, which is what makes a
+        // flow diagram possible: what the adapter is delivering, and what the Mac is
+        // drawing. The rest goes into the battery.
+        if let data = props["BatteryData"] as? [String: Any] {
+            s.adapterPower = data["AdapterPower"] as? Double
+            s.systemPower = data["SystemPower"] as? Double
         }
         return s
     }

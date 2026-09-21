@@ -370,6 +370,10 @@ struct PowerCard: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 10)
                 }
+
+                Divider().overlay(Panel.hairline).padding(.vertical, 2)
+
+                PowerFlowView(snapshot: snapshot)
             }
             .padding(14)
         }

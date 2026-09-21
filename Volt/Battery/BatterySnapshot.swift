@@ -25,6 +25,10 @@ struct BatterySnapshot: Equatable {
 
     var adapterWatts: Int?
     var adapterName: String?
+    /// Power actually arriving from the adapter, as opposed to its rating.
+    var adapterPower: Double?
+    /// What the Mac itself is drawing, separate from what goes into the battery.
+    var systemPower: Double?
 
     /// "Normal", "Service Recommended", ... as reported by macOS.
     var condition: String?
@@ -41,6 +45,17 @@ struct BatterySnapshot: Equatable {
 
     /// Instantaneous power flow in watts. Positive = charging, negative = draining.
     var watts: Double { voltage * amperage }
+
+    /// Power going into the battery right now; zero when it is not charging.
+    var chargePower: Double { max(0, watts) }
+
+    /// What the machine is drawing. Falls back to the adapter reading minus what the
+    /// battery is taking, then to the discharge rate, so there is always a figure.
+    var load: Double {
+        if let systemPower, systemPower > 0 { return systemPower }
+        if let adapterPower, adapterPower > 0 { return max(0, adapterPower - chargePower) }
+        return abs(min(0, watts))
+    }
 
     var isDischarging: Bool { isPresent && !isPluggedIn }
 

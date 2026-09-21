@@ -29,6 +29,11 @@ the meter — movement being the one cue that reads as charging without being la
 their own panel, reached from a selector at the top rather than by scrolling past
 everything.
 
+**Power flow.** Plugged in, the adapter's output splits between charging the pack and
+running the Mac — shown as two bands whose thickness is their share, with the adapter's
+rating on one side and where the watts land on the other. On battery it is a single band
+flowing the other way.
+
 **Health.** Capacity against design capacity, cycle count, condition, temperature, live
 watts / volts / amps, and raw mAh. Where macOS reports its own "Maximum Capacity"
 figure, that is shown in preference to the computed one.
@@ -119,7 +124,8 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 | Data | Source |
 | --- | --- |
 | Charge, health, cycles, temperature, current | `AppleSmartBattery` in the IO registry |
-| Change notifications | `IOPSNotificationCreateRunLoopSource` |
+| Adapter output and system draw | `BatteryData.AdapterPower` / `SystemPower` |
+| Change notifications | `IOPSNotificationCreateRunLoopSource`, plus a `kIOGeneralInterest` notification on the battery itself |
 | Condition, Apple's Maximum Capacity | `system_profiler SPPowerDataType`, every 15 min |
 | AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType` |
 | Magic Mouse / Keyboard / Trackpad | `ioreg -k BatteryPercent` |
