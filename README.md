@@ -92,6 +92,17 @@ any wallpaper.
 
 ![Menu bar icons](docs/menubar.png)
 
+## Low Power Mode
+
+A switch in the panel turns macOS Low Power Mode on and off. Reading the state is free —
+`ProcessInfo` reports it and posts a notification when it changes, whoever changed it.
+Changing it is `pmset powermode`, which only root may do.
+
+There are two ways to get root. A privileged helper daemon runs as root permanently so
+the switch can flip silently — which means installing a root process for the sake of one
+toggle. Volt uses the other: the system's own administrator prompt, which accepts Touch
+ID and leaves nothing privileged installed. The cost is a prompt each time you switch.
+
 ## What it does not do
 
 **Volt never changes how your Mac charges.** There is no charge limiting and nothing is
@@ -100,7 +111,10 @@ does not unplug for you.
 
 Some things macOS simply does not expose:
 
-- **Apple Watch battery.** Not published to the Mac at all, by any route.
+- **Apple Watch battery.** Not published to the Mac by any route, and this was tested
+  rather than assumed: the Bluetooth report carries no battery keys for it, it accepts a
+  Bluetooth connection but exposes no battery service, and it does not send the
+  advertisement AirPods use.
 - **iPhone / iPad health and cycle count.** `system_profiler` reports nothing for these
   devices, and the health figures live behind `MobileDevice.framework`, which needs the
   device plugged in and trusted at least once.
@@ -129,7 +143,10 @@ that one is exact and complete; a decoded level is rounded and can be missing a 
 Rounded values are shown with a `~`.
 
 Anything still without a level is listed with the reason rather than hidden, and the
-last level seen is remembered so a device that stops reporting keeps its number.
+last level seen is remembered so a device that stops reporting keeps its number. The
+exception is a bare Bluetooth LE link with no battery and no history: headphones sitting
+in a drawer can hold one, and it says nothing about the device being in use. Right-click
+any device to hide it; hidden devices can be shown again from Settings › Devices.
 
 ## iPhone and iPad
 

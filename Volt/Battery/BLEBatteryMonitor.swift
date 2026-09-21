@@ -127,13 +127,24 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         guard let central, central.state == .poweredOn else { return }
 
         for peripheral in central.retrieveConnectedPeripherals(withServices: [Self.batteryService]) {
+            // This path had no filter, and it is how a pair of headphones nobody was
+            // using ended up connected to and listed.
+            guard Self.isWanted(peripheral.name) else { continue }
             adopt(peripheral)
         }
 
         if !knownIdentifiers.isEmpty {
             for peripheral in central.retrievePeripherals(withIdentifiers: Array(knownIdentifiers)) {
+                guard Self.isWanted(peripheral.name) else {
+                    forget(peripheral.identifier)
+                    continue
+                }
                 adopt(peripheral)
             }
+        }
+
+        for peripheral in Array(peripherals.values) where !Self.isWanted(peripheral.name) {
+            forget(peripheral.identifier)
         }
 
         for peripheral in peripherals.values where peripheral.state == .connected {
@@ -154,21 +165,23 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     /// one that advertises the battery service outright, or one whose name says it is
     /// the user's phone or tablet. Connecting to every stray beacon in range would be
     /// slow and rude.
+    /// Only Apple devices this path exists for. It used to accept anything that
+    /// advertised the battery service, which meant actively connecting to whatever
+    /// headphones happened to be in range — including ones the user was not using —
+    /// and, once one answered, remembering it and reconnecting forever.
+    /// Tested rather than assumed: the Watch and AirPods both accept a connection and
+    /// neither exposes the battery service, so connecting to them gains nothing. AirPods
+    /// are read from their broadcasts instead, without connecting at all.
+    private static let wanted = ["iphone", "ipad", "ipod"]
+
+    private static func isWanted(_ name: String?) -> Bool {
+        let lowered = (name ?? "").lowercased()
+        guard !lowered.isEmpty else { return false }
+        return wanted.contains { lowered.contains($0) }
+    }
+
     private func isCandidate(_ peripheral: CBPeripheral, advertisement: [String: Any]) -> Bool {
-        if knownIdentifiers.contains(peripheral.identifier) { return true }
-
-        if let services = advertisement[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID],
-           services.contains(Self.batteryService) {
-            return true
-        }
-
-        let name = ((advertisement[CBAdvertisementDataLocalNameKey] as? String)
-                    ?? peripheral.name ?? "").lowercased()
-        guard !name.isEmpty else { return false }
-        // AirPods are worth a try: macOS stops reporting their level through the
-        // Bluetooth report once they are connected, so if they happen to expose the
-        // standard battery service it is the only live figure available.
-        return ["iphone", "ipad", "ipod", "airpods"].contains { name.contains($0) }
+        Self.isWanted((advertisement[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name)
     }
 
     private func adopt(_ peripheral: CBPeripheral) {
@@ -190,6 +203,19 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         guard let data = try? Data(contentsOf: knownStoreURL),
               let ids = try? JSONDecoder().decode([UUID].self, from: data) else { return }
         knownIdentifiers = Set(ids)
+    }
+
+    /// Drops a device completely: its connection, its reading and its memory.
+    private func forget(_ identifier: UUID) {
+        if let peripheral = peripherals.removeValue(forKey: identifier) {
+            central?.cancelPeripheralConnection(peripheral)
+        }
+        levels.removeValue(forKey: identifier)
+        publish()
+
+        guard knownIdentifiers.remove(identifier) != nil,
+              let data = try? JSONEncoder().encode(Array(knownIdentifiers)) else { return }
+        try? data.write(to: knownStoreURL, options: .atomic)
     }
 
     private func remember(_ identifier: UUID) {

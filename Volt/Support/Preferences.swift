@@ -39,6 +39,10 @@ final class Preferences: ObservableObject {
     @Published var deviceAlertLevel: Int = 15 { didSet { save() } }
     @Published var deviceAlertsEnabled: Bool = true { didSet { save() } }
     @Published var deviceAlertColor: AlertColor = .amber { didSet { save() } }
+    /// Devices the user has hidden, by normalised name.
+    @Published var hiddenDevices: Set<String> = [] { didSet { save() } }
+    /// Display names for hidden devices, so Settings can list them readably.
+    @Published var hiddenDeviceNames: [String: String] = [:] { didSet { save() } }
 
     @Published var highTemperatureC: Double = 40 { didSet { save() } }
     @Published var trackEnergy: Bool = true { didSet { save() } }
@@ -88,6 +92,8 @@ final class Preferences: ObservableObject {
         var deviceAlertLevel: Int
         var deviceAlertsEnabled: Bool
         var deviceAlertColor: AlertColor?
+        var hiddenDevices: [String]?
+        var hiddenDeviceNames: [String: String]?
         var highTemperatureC: Double
         var trackEnergy: Bool
     }
@@ -109,6 +115,8 @@ final class Preferences: ObservableObject {
         deviceAlertLevel = p.deviceAlertLevel
         deviceAlertsEnabled = p.deviceAlertsEnabled
         deviceAlertColor = p.deviceAlertColor ?? .amber
+        hiddenDevices = Set(p.hiddenDevices ?? [])
+        hiddenDeviceNames = p.hiddenDeviceNames ?? [:]
         highTemperatureC = p.highTemperatureC
         trackEnergy = p.trackEnergy
         isLoading = false
@@ -125,6 +133,8 @@ final class Preferences: ObservableObject {
                               deviceAlertLevel: deviceAlertLevel,
                               deviceAlertsEnabled: deviceAlertsEnabled,
                               deviceAlertColor: deviceAlertColor,
+                              hiddenDevices: Array(hiddenDevices),
+                              hiddenDeviceNames: hiddenDeviceNames,
                               highTemperatureC: highTemperatureC, trackEnergy: trackEnergy)
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? data.write(to: url, options: .atomic)

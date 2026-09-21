@@ -336,6 +336,25 @@ struct DeviceSettings: View {
                 }
             } header: {
                 Text("Found").font(.system(size: 12, weight: .semibold))
+            } footer: {
+                Text("Right-click a device in the panel to hide it.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+
+            if !prefs.hiddenDevices.isEmpty {
+                Section {
+                    ForEach(prefs.hiddenDevices.sorted(), id: \.self) { key in
+                        HStack {
+                            Text(prefs.hiddenDeviceNames[key] ?? key)
+                                .font(.system(size: 12))
+                            Spacer()
+                            Button("Show") { DeviceMonitor.shared.unhide(key: key) }
+                        }
+                    }
+                } header: {
+                    Text("Hidden").font(.system(size: 12, weight: .semibold))
+                }
             }
         }
         .formStyle(.grouped)

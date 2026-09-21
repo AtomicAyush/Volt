@@ -207,3 +207,30 @@ struct Segments<T: Hashable & Identifiable>: View {
             .fill(Color.black.opacity(0.28)))
     }
 }
+
+/// An on/off switch drawn in SwiftUI rather than borrowed from AppKit, so it sits
+/// correctly on the panel's own dark cards the way the segmented control does.
+struct PillSwitch: View {
+    let isOn: Bool
+    var tint: Color = Panel.green
+    let action: () -> Void
+
+    var body: some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(isOn ? tint : Color.white.opacity(0.16))
+                .frame(width: 34, height: 20)
+            Circle()
+                .fill(.white)
+                .shadow(color: .black.opacity(0.3), radius: 1, y: 0.5)
+                .frame(width: 16, height: 16)
+                .padding(2)
+        }
+        .animation(.easeInOut(duration: 0.18), value: isOn)
+        .contentShape(Capsule())
+        .onTapGesture(perform: action)
+        .accessibilityElement()
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+}

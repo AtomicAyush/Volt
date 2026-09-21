@@ -86,6 +86,14 @@ final class DeviceMonitor: ObservableObject {
         // Nothing remembered. A connected device is still worth listing, with the
         // reason it has no number; a disconnected one with no history is not.
         guard device.isConnected || device.note != nil else { return nil }
+
+        // A bare LE link with no battery and no history says nothing about the device
+        // being in use — headphones sitting in a drawer can hold one — so it is left
+        // out. Phones, tablets and watches are the exception: their note explains
+        // the missing number and they are expected in the list.
+        if device.isBareLELink, ![.phone, .tablet, .watch].contains(device.kind) {
+            return nil
+        }
         var plain = device
         if plain.note == nil { plain.note = "Battery not reported over Bluetooth" }
         return plain
@@ -139,6 +147,19 @@ final class DeviceMonitor: ObservableObject {
                 self.remerge()
             }
         }
+    }
+
+    /// Hides a device from the list for good, until it is shown again from Settings.
+    func hide(_ device: DeviceBattery) {
+        Preferences.shared.hiddenDevices.insert(Self.nameKey(device.name))
+        Preferences.shared.hiddenDeviceNames[Self.nameKey(device.name)] = device.name
+        remerge()
+    }
+
+    func unhide(key: String) {
+        Preferences.shared.hiddenDevices.remove(key)
+        Preferences.shared.hiddenDeviceNames.removeValue(forKey: key)
+        remerge()
     }
 
     private func remerge() {
@@ -273,7 +294,9 @@ final class DeviceMonitor: ObservableObject {
     }
 
     private func publish(_ found: [DeviceBattery]) {
-        let sorted = deduplicate(found).sorted {
+        let hidden = Preferences.shared.hiddenDevices
+        let visible = deduplicate(found).filter { !hidden.contains(Self.nameKey($0.name)) }
+        let sorted = visible.sorted {
             // Devices with a real reading first, then connected, then by level.
             if $0.hasReading != $1.hasReading { return $0.hasReading }
             if $0.isConnected != $1.isConnected { return $0.isConnected }
@@ -348,8 +371,13 @@ final class DeviceMonitor: ObservableObject {
             model = UInt16(digits, radix: 16)
         }
 
+        // "0x400000 < BLE >" means a bare LE link; real use adds audio or HID profiles.
+        let services = (info["device_services"] as? String) ?? ""
+        let bareLE = services.contains("BLE") && !services.contains("A2DP")
+            && !services.contains("HFP") && !services.contains("HID")
+
         let address = (info["device_address"] as? String) ?? name
-        return DeviceBattery(
+        var device = DeviceBattery(
             id: address,
             name: name,
             kind: kind,
@@ -359,6 +387,8 @@ final class DeviceMonitor: ObservableObject {
             note: note,
             model: model
         )
+        device.isBareLELink = bareLE
+        return device
     }
 
     /// Magic Mouse / Keyboard / Trackpad publish `BatteryPercent` straight into the registry.

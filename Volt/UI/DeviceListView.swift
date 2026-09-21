@@ -97,6 +97,10 @@ struct DeviceRow: View {
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Hide \(device.name)") { DeviceMonitor.shared.hide(device) }
+        }
     }
 
     private func tint(_ percent: Int) -> Color {

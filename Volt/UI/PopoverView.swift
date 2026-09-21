@@ -486,10 +486,15 @@ struct ActionsCard: View {
     let openSettings: () -> Void
     let quit: () -> Void
 
+    @ObservedObject private var lowPower = LowPowerMode.shared
+
     var body: some View {
         Card {
             ActionRow(symbol: "gearshape.fill", tint: Panel.secondary,
                       title: "Settings…", action: openSettings)
+                .sectionDivider()
+
+            LowPowerRow(lowPower: lowPower)
                 .sectionDivider()
             ActionRow(symbol: "power", tint: Panel.red, title: "Quit Volt",
                       trailing: version, action: quit)
@@ -499,6 +504,43 @@ struct ActionsCard: View {
     private var version: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         return "v" + (v ?? "1.0")
+    }
+}
+
+/// Low Power Mode, switchable from the panel. Changing it asks for an administrator
+/// password or Touch ID, because macOS only lets root change it.
+struct LowPowerRow: View {
+    @ObservedObject var lowPower: LowPowerMode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 10) {
+                Image(systemName: lowPower.isEnabled ? "leaf.fill" : "leaf")
+                    .font(.system(size: 13))
+                    .foregroundStyle(lowPower.isEnabled ? Panel.amber : Panel.secondary)
+                    .frame(width: 18)
+                Text("Low Power Mode")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Panel.label)
+                Spacer()
+                if lowPower.isChanging {
+                    ProgressView().controlSize(.small)
+                } else {
+                    PillSwitch(isOn: lowPower.isEnabled, tint: Panel.amber) {
+                        lowPower.toggle()
+                    }
+                    .accessibilityLabel("Low Power Mode")
+                }
+            }
+            if let error = lowPower.lastError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Panel.red)
+                    .padding(.leading, 28)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
     }
 }
 

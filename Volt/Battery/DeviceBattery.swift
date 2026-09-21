@@ -61,6 +61,10 @@ struct DeviceBattery: Identifiable, Equatable {
     /// True when the level came from a Continuity advertisement, which reports in
     /// steps of ten rather than exactly.
     var isApproximate: Bool = false
+    /// Connected over Bluetooth LE alone, with no audio or input profile — the kind of
+    /// link System Settings does not list and that says nothing about the device being
+    /// in use.
+    var isBareLELink: Bool = false
 
     /// The cell most at risk — what alerts and the sort order key off.
     var lowestPercent: Int { cells.map(\.percent).min() ?? 100 }
