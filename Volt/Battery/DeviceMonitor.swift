@@ -67,13 +67,14 @@ final class DeviceMonitor: ObservableObject {
     /// Fills in a device whose current report carries no battery, and records one that
     /// does. Returns nil only when there is nothing useful to show at all.
     private func applyCache(to device: DeviceBattery) -> DeviceBattery? {
+        let key = Self.nameKey(device.name)
         if device.hasReading {
-            lastKnown[device.id] = (device.cells, Date())
+            lastKnown[key] = (device.cells, Date())
             saveCache()
             return device
         }
 
-        if let remembered = lastKnown[device.id] {
+        if let remembered = lastKnown[key] {
             var filled = device
             filled = DeviceBattery(id: device.id, name: device.name, kind: device.kind,
                                    cells: remembered.cells, isCharging: false,
@@ -228,15 +229,51 @@ final class DeviceMonitor: ObservableObject {
 
     /// "Ayush's Iphone" from Bluetooth and "Ayush's iPhone" from the cable are the
     /// same device; compare on letters and digits only.
+    static func nameKey(_ name: String) -> String {
+        name.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
     private static func matches(_ a: String, _ b: String) -> Bool {
-        func key(_ s: String) -> String {
-            s.lowercased().filter { $0.isLetter || $0.isNumber }
+        nameKey(a) == nameKey(b)
+    }
+
+    /// Collapses entries for the same device.
+    ///
+    /// macOS lists a connected accessory under a rotating private address and the same
+    /// accessory under its real one, so AirPods can arrive twice — once with a level
+    /// and once without. Names are the only thing stable across both.
+    private func deduplicate(_ devices: [DeviceBattery]) -> [DeviceBattery] {
+        var best: [String: DeviceBattery] = [:]
+        var order: [String] = []
+
+        for device in devices {
+            let key = Self.nameKey(device.name)
+            if let existing = best[key] {
+                best[key] = Self.preferred(existing, device)
+            } else {
+                best[key] = device
+                order.append(key)
+            }
         }
-        return key(a) == key(b)
+        return order.compactMap { best[$0] }
+    }
+
+    /// An exact live level beats a rounded one, which beats a remembered one, which
+    /// beats an entry that only explains why there is no number.
+    private static func preferred(_ a: DeviceBattery, _ b: DeviceBattery) -> DeviceBattery {
+        func rank(_ d: DeviceBattery) -> Int {
+            if d.hasReading && !d.isApproximate && d.isConnected { return 5 }
+            if d.hasReading && !d.isApproximate { return 4 }
+            if d.hasReading && d.isConnected { return 3 }
+            if d.hasReading { return 2 }
+            if d.isConnected { return 1 }
+            return 0
+        }
+        return rank(b) > rank(a) ? b : a
     }
 
     private func publish(_ found: [DeviceBattery]) {
-        let sorted = found.sorted {
+        let sorted = deduplicate(found).sorted {
             // Devices with a real reading first, then connected, then by level.
             if $0.hasReading != $1.hasReading { return $0.hasReading }
             if $0.isConnected != $1.isConnected { return $0.isConnected }

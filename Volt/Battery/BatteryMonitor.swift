@@ -29,13 +29,13 @@ final class BatteryMonitor: ObservableObject {
         installPowerSourceNotification()
         installBatteryInterestNotification()
 
-        // The registry republishes on its own schedule — sometimes seconds apart,
-        // sometimes not. The interest notification above catches each republish as it
-        // happens; this is only a floor under it.
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        // The SMC refreshes about once a second, so that is the cadence worth
+        // sampling at. The interest notification above still catches registry
+        // republishes as they happen.
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.refresh()
         }
-        timer?.tolerance = 0.5
+        timer?.tolerance = 0.2
         refreshSystemProfilerFacts()
     }
 
@@ -144,7 +144,27 @@ final class BatteryMonitor: ObservableObject {
             s.adapterPower = data["AdapterPower"] as? Double
             s.systemPower = data["SystemPower"] as? Double
         }
+
+        applySMC(to: &s)
         return s
+    }
+
+    /// Overlays the measurements the SMC carries, which refresh about every second.
+    /// The registry's own copies lag by many seconds and repeat in between, so the
+    /// readout looked frozen next to anything reading the controller directly.
+    private func applySMC(to s: inout BatterySnapshot) {
+        let smc = SMC.shared
+        guard smc.isAvailable else { return }
+
+        if let milliamps = smc.int16("B0AC") { s.amperage = Double(milliamps) / 1000 }
+        if let millivolts = smc.uint16("B0AV"), millivolts > 1000 {
+            s.voltage = Double(millivolts) / 1000
+        }
+        // PDTR is what the adapter is putting in. PSTR is deliberately not used for
+        // the system figure: it swings between 5 and 20 W with no relation to the 9 W
+        // actually leaving the pack, so it is measuring something else.
+        if let adapterIn = smc.float("PDTR"), adapterIn > 0 { s.adapterPower = adapterIn }
+        if let batteryPower = smc.float("PPBR") { s.batteryPower = batteryPower }
     }
 
     /// The gauge reports a "still working it out" value in several ways: 65535, -1,

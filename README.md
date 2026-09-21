@@ -29,6 +29,11 @@ the meter — movement being the one cue that reads as charging without being la
 their own panel, reached from a selector at the top rather than by scrolling past
 everything.
 
+**Live electrical readings.** Current and voltage come from the SMC rather than the IO
+registry. The registry republishes on its own schedule — eight seconds or more between
+updates — so a readout taken from it visibly lags and repeats. The controller refreshes
+about once a second, which is what makes the numbers look live.
+
 **Power flow.** Plugged in, the adapter's output splits between charging the pack and
 running the Mac — shown as two ribbons whose thickness is their share, with what the
 adapter is actually delivering on one side and where the watts land on the other. On
@@ -156,8 +161,9 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 
 | Data | Source |
 | --- | --- |
-| Charge, health, cycles, temperature, current | `AppleSmartBattery` in the IO registry |
-| Adapter output and system draw | `BatteryData.AdapterPower` / `SystemPower` |
+| Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry |
+| Current, voltage, adapter input | `AppleSMC` keys `B0AC`, `B0AV`, `PDTR`, `PPBR` |
+| Adapter output fallback | `BatteryData.AdapterPower` |
 | Change notifications | `IOPSNotificationCreateRunLoopSource`, plus a `kIOGeneralInterest` notification on the battery itself |
 | Condition, Apple's Maximum Capacity | `system_profiler SPPowerDataType`, every 15 min |
 | AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType` |
