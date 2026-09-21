@@ -34,6 +34,10 @@ running the Mac — shown as two ribbons whose thickness is their share, with wh
 adapter is actually delivering on one side and where the watts land on the other. On
 battery it is a single ribbon flowing the other way.
 
+The ribbons animate. Readings move continuously and a diagram that snapped between them
+would be harder to read than one that flows, so the band geometry is interpolated
+through `animatableData` and the figures roll over rather than cutting.
+
 The headline figure is the delivered power, which moves with the load. The smaller one
 beneath it is the negotiated USB-C contract — the ceiling the Mac and charger agreed on,
 not what is printed on the brick. A 140W charger reports 100W there unless it negotiates
