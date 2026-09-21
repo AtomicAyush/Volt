@@ -137,7 +137,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Volt Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 520, height: 560))
+        window.setContentSize(NSSize(width: 760, height: 580))
         window.center()
         window.isReleasedWhenClosed = false
         settingsWindow = window

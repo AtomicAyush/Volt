@@ -97,6 +97,27 @@ final class HelperClient: ObservableObject {
         }
     }
 
+    /// Asks the helper for its version and nothing else. Used to confirm it is installed
+    /// and answering without touching Low Power Mode.
+    func ping(completion: @escaping (String?) -> Void) {
+        guard let team = Self.ownTeamIdentifier() else { completion(nil); return }
+        let connection = NSXPCConnection(machServiceName: Self.machService, options: .privileged)
+        connection.remoteObjectInterface = NSXPCInterface(with: VoltHelperProtocol.self)
+        connection.setCodeSigningRequirement(
+            "identifier \"com.ayush.Volt.helper\" and anchor apple generic "
+            + "and certificate leaf[subject.OU] = \"\(team)\""
+        )
+        connection.resume()
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            DispatchQueue.main.async { completion("error: \(error.localizedDescription)") }
+            connection.invalidate()
+        } as? VoltHelperProtocol
+        proxy?.version { version in
+            DispatchQueue.main.async { completion(version) }
+            connection.invalidate()
+        }
+    }
+
     /// The Team ID this app is signed with, read from its own signature.
     static func ownTeamIdentifier() -> String? {
         var code: SecCode?

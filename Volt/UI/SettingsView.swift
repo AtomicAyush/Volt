@@ -6,49 +6,118 @@ struct ColorWell: View {
     @Binding var selection: AlertColor
 
     var body: some View {
-        Menu {
-            ForEach(AlertColor.allCases) { option in
-                Button {
-                    selection = option
-                } label: {
-                    HStack {
-                        Image(systemName: option == selection ? "checkmark.circle.fill" : "circle.fill")
-                            .foregroundStyle(option.color)
-                        Text(option.label)
-                    }
-                }
+        HStack(spacing: 6) {
+            // Outside the Menu on purpose: macOS strips custom shapes from menu labels,
+            // which left the picker showing a colour's name with no colour.
+            Circle()
+                .fill(selection.color)
+                .frame(width: 12, height: 12)
+                .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
+            Picker("", selection: $selection) {
+                ForEach(AlertColor.allCases) { Text($0.label).tag($0) }
             }
-        } label: {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(selection.color)
-                    .frame(width: 12, height: 12)
-                    .overlay(Circle().stroke(.black.opacity(0.25), lineWidth: 0.5))
-                Text(selection.label).font(.system(size: 11))
-            }
+            .labelsHidden()
+            .frame(width: 92)
         }
-        .menuStyle(.borderlessButton)
-        .frame(width: 96)
     }
 }
 
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            AlertSettings()
-                .tabItem { Label("Alerts", systemImage: "bell.badge") }
-            LifecycleSettings()
-                .tabItem { Label("Charging", systemImage: "bolt") }
-            AppearanceSettings()
-                .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
-            DeviceSettings()
-                .tabItem { Label("Devices", systemImage: "airpods.pro") }
-            GeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            AboutSettings()
-                .tabItem { Label("About", systemImage: "info.circle") }
+/// The panes of the settings window, in sidebar order.
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case alerts, charging, menuBar, devices, general, about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .alerts: return "Alerts"
+        case .charging: return "Charging"
+        case .menuBar: return "Menu Bar"
+        case .devices: return "Devices"
+        case .general: return "General"
+        case .about: return "About"
         }
-        .frame(width: 520, height: 560)
+    }
+
+    var symbol: String {
+        switch self {
+        case .alerts: return "bell.badge.fill"
+        case .charging: return "bolt.fill"
+        case .menuBar: return "menubar.rectangle"
+        case .devices: return "airpods.gen3"
+        case .general: return "gearshape.fill"
+        case .about: return "info.circle.fill"
+        }
+    }
+
+    /// The coloured tile behind each icon, as System Settings draws them.
+    var tile: Color {
+        switch self {
+        case .alerts: return .red
+        case .charging: return .green
+        case .menuBar: return .blue
+        case .devices: return .purple
+        case .general: return .gray
+        case .about: return .indigo
+        }
+    }
+}
+
+/// A sidebar on the left, the selected pane on the right — the layout System Settings
+/// uses. It replaces a tab bar that, on current macOS, floated up into the title bar and
+/// was clipped by it.
+struct SettingsView: View {
+    @State private var pane: SettingsPane
+
+    init(initialPane: SettingsPane = .alerts) {
+        _pane = State(initialValue: initialPane)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            List(SettingsPane.allCases, selection: $pane) { item in
+                Label {
+                    Text(item.title)
+                } icon: {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(item.tile.gradient))
+                }
+                .padding(.vertical, 2)
+                .tag(item)
+            }
+            .listStyle(.sidebar)
+            .frame(width: 190)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(pane.title)
+                    .font(.system(size: 20, weight: .bold))
+                    .padding(.horizontal, 22)
+                    .padding(.top, 18)
+                    .padding(.bottom, 4)
+
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .frame(width: 760, height: 580)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch pane {
+        case .alerts: AlertSettings()
+        case .charging: LifecycleSettings()
+        case .menuBar: AppearanceSettings()
+        case .devices: DeviceSettings()
+        case .general: GeneralSettings()
+        case .about: AboutSettings()
+        }
     }
 }
 
@@ -307,7 +376,7 @@ struct DeviceSettings: View {
             } header: {
                 Text("Accessories").font(.system(size: 12, weight: .semibold))
             } footer: {
-                Text("AirPods and accessories come from macOS's Bluetooth report. iPhone and iPad levels are read straight from the Bluetooth battery service, which needs the device paired and nearby — health and cycle count still need a cable.")
+                Text("AirPods levels come from the Bluetooth framework — the same figures the Sound menu shows. iPhone and iPad are read from their Bluetooth battery service and need to be paired and nearby. The Apple Watch reports through the Volt companion app on your watch and iPhone.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -321,7 +390,9 @@ struct DeviceSettings: View {
                             Image(systemName: device.kind.symbol).frame(width: 18)
                             Text(device.name).font(.system(size: 12))
                             Spacer()
-                            Text(device.cells.map { $0.label.isEmpty ? "\($0.percent)%" : "\($0.label) \($0.percent)%" }
+                            Text(device.cells.isEmpty
+                                 ? (device.note ?? "No reading")
+                                 : device.cells.map { $0.label.isEmpty ? "\($0.percent)%" : "\($0.label) \($0.percent)%" }
                                     .joined(separator: "  "))
                                 .font(.system(size: 11))
                                 .monospacedDigit()
@@ -420,14 +491,6 @@ struct GeneralSettings: View {
                 Text("Energy").font(.system(size: 12, weight: .semibold))
             }
 
-            Section {
-                Text("Volt reads the battery through IOKit and never sends anything anywhere. It does not modify charging behaviour.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Button("Quit Volt") { NSApp.terminate(nil) }
-            } header: {
-                Text("About").font(.system(size: 12, weight: .semibold))
-            }
         }
         .formStyle(.grouped)
     }
@@ -473,6 +536,7 @@ struct AboutSettings: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 14) {
                     Image(nsImage: MenuBarIcon.image(for: previewSnapshot,
@@ -506,8 +570,9 @@ struct AboutSettings: View {
                         .font(.system(size: 13, weight: .semibold))
 
                     detail("Written in Swift, with SwiftUI for the panel and settings and AppKit for the menu bar item, the alert overlay and the icon, which is drawn by hand rather than assembled from system symbols.")
-                    detail("Charge, health, cycle count, temperature and current are read straight out of IOKit's AppleSmartBattery entry. Updates arrive from IOPowerSources the moment macOS notices a change, with a slow timer filling in the live values between them.")
-                    detail("iPhone and iPad report their battery over Bluetooth, through the standard GATT battery service, so no cable is needed. AirPods and other accessories come from the system's Bluetooth report, and Apple's own input devices from the IO registry.")
+                    detail("Charge, health, cycle count and temperature are read from IOKit's AppleSmartBattery entry. Current, voltage and adapter power come from the System Management Controller, which refreshes about once a second — the battery entry itself can go eight seconds or more between updates.")
+                    detail("iPhone and iPad report their battery over Bluetooth, through the standard GATT battery service, so no cable is needed. AirPods levels come from the Bluetooth framework — the same figures the Sound menu shows — with their own broadcasts as a fallback. The Apple Watch reports through a companion app on the watch and iPhone.")
+                    detail("Low Power Mode is switched through a small helper that runs as administrator, can do nothing else, and only answers to Volt.")
                     detail("Per-app energy use is sampled from the same energy-impact figure Activity Monitor shows, then kept on disk so the 24-hour, 7-day and 30-day views have real history behind them.")
                 }
 
@@ -532,7 +597,8 @@ struct AboutSettings: View {
                 Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
 
     private func detail(_ text: String) -> some View {
