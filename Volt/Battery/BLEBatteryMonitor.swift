@@ -35,6 +35,21 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     private static let batteryService = CBUUID(string: "180F")
     private static let batteryLevel = CBUUID(string: "2A19")
 
+    /// Published by the Volt companion app on the iPhone: the paired Apple Watch's
+    /// battery, relayed from the watch. Layout: percent, flags (bit 0 charging, bit 1
+    /// full), then the watch's timestamp as little-endian Unix seconds.
+    private static let watchService = CBUUID(string: "6B1F0001-3C2A-4E7B-9D51-7A2E5C0B9F10")
+    private static let watchLevel = CBUUID(string: "6B1F0002-3C2A-4E7B-9D51-7A2E5C0B9F10")
+    private static let services = [batteryService, watchService]
+
+    /// The Apple Watch's battery as last relayed by the iPhone companion app.
+    struct WatchRelayReading: Equatable {
+        let percent: Int
+        let isCharging: Bool
+        let reportedAt: Date
+    }
+    @Published private(set) var watchReading: WatchRelayReading?
+
     private var central: CBCentralManager?
     /// CoreBluetooth does not retain peripherals; dropping one cancels its connection.
     private var peripherals: [UUID: CBPeripheral] = [:]
@@ -193,7 +208,7 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
             // Without a timeout this request simply waits until the device is reachable.
             central?.connect(peripheral, options: nil)
         } else if peripheral.services == nil {
-            peripheral.discoverServices([Self.batteryService])
+            peripheral.discoverServices(Self.services)
         }
     }
 
@@ -227,7 +242,7 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     private func readLevel(from peripheral: CBPeripheral) {
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.batteryService })
         else {
-            peripheral.discoverServices([Self.batteryService])
+            peripheral.discoverServices(Self.services)
             return
         }
         guard let characteristic = service.characteristics?
@@ -290,7 +305,7 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         peripheral.delegate = self
-        peripheral.discoverServices([Self.batteryService])
+        peripheral.discoverServices(Self.services)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
@@ -319,17 +334,22 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
 
 extension BLEBatteryMonitor: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard error == nil,
-              let service = peripheral.services?.first(where: { $0.uuid == Self.batteryService })
-        else { return }
-        peripheral.discoverCharacteristics([Self.batteryLevel], for: service)
+        guard error == nil else { return }
+        for service in peripheral.services ?? [] {
+            if service.uuid == Self.batteryService {
+                peripheral.discoverCharacteristics([Self.batteryLevel], for: service)
+            } else if service.uuid == Self.watchService {
+                peripheral.discoverCharacteristics([Self.watchLevel], for: service)
+            }
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
         guard error == nil,
               let characteristic = service.characteristics?
-                .first(where: { $0.uuid == Self.batteryLevel }) else { return }
+                .first(where: { $0.uuid == Self.batteryLevel || $0.uuid == Self.watchLevel })
+        else { return }
 
         peripheral.readValue(for: characteristic)
         // Most devices push updates, which spares us most of the polling.
@@ -340,6 +360,18 @@ extension BLEBatteryMonitor: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if error == nil, characteristic.uuid == Self.watchLevel,
+           let data = characteristic.value, data.count >= 6 {
+            let bytes = [UInt8](data)
+            let seconds = UInt32(bytes[2]) | UInt32(bytes[3]) << 8
+                | UInt32(bytes[4]) << 16 | UInt32(bytes[5]) << 24
+            let reading = WatchRelayReading(percent: Int(min(bytes[0], 100)),
+                                            isCharging: bytes[1] & 0x03 != 0,
+                                            reportedAt: Date(timeIntervalSince1970: TimeInterval(seconds)))
+            if reading != watchReading { watchReading = reading }
+            return
+        }
+
         guard error == nil,
               characteristic.uuid == Self.batteryLevel,
               let data = characteristic.value,
