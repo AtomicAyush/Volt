@@ -57,14 +57,35 @@ struct MeterBar: View {
     let tint: Color
     var segments: Int = 0
     var height: CGFloat = 7
+    /// Runs a highlight along the filled part. Movement is the one cue that reads as
+    /// "charging" without having to be labelled.
+    var isCharging: Bool = false
+
+    @State private var shimmer = false
 
     var body: some View {
         GeometryReader { geo in
+            let filled = max(height, geo.size.width * min(1, max(0, fraction)))
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.1))
                 Capsule()
                     .fill(tint)
-                    .frame(width: max(height, geo.size.width * min(1, max(0, fraction))))
+                    .frame(width: filled)
+                    .overlay(alignment: .leading) {
+                        if isCharging {
+                            LinearGradient(colors: [.clear, .white.opacity(0.55), .clear],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .frame(width: filled * 0.4)
+                                .offset(x: shimmer ? filled : -filled * 0.4)
+                        }
+                    }
+                    .clipShape(Capsule())
+                    .onAppear {
+                        guard isCharging else { return }
+                        withAnimation(.linear(duration: 1.7).repeatForever(autoreverses: false)) {
+                            shimmer = true
+                        }
+                    }
 
                 if segments > 1 {
                     HStack(spacing: 0) {

@@ -136,6 +136,13 @@ struct StatusCard: View {
                         Text("%")
                             .font(.system(size: 17, weight: .medium, design: .rounded))
                             .foregroundStyle(tint.opacity(0.75))
+
+                        if snapshot.isCharging {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(tint)
+                                .padding(.leading, 3)
+                        }
                     }
 
                     Spacer()
@@ -162,22 +169,34 @@ struct StatusCard: View {
                 }
 
                 HStack(spacing: 8) {
-                    BatteryGlyph(level: snapshot.percentage, tint: tint, outlineTint: true)
+                    BatteryGlyph(level: snapshot.percentage, tint: tint,
+                                 outlineTint: true, isCharging: snapshot.isCharging)
                         .frame(width: 26, height: 13)
+
+                    // While charging the state is tinted and sits on a matching chip,
+                    // so it reads as a state rather than a caption.
                     Text(stateText)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Panel.label)
+                        .foregroundStyle(snapshot.isCharging ? tint : Panel.label)
+                        .padding(.horizontal, snapshot.isCharging ? 7 : 0)
+                        .padding(.vertical, snapshot.isCharging ? 2 : 0)
+                        .background {
+                            if snapshot.isCharging {
+                                Capsule().fill(tint.opacity(0.16))
+                            }
+                        }
 
                     Spacer()
 
                     Text(String(format: "%@%.1f W", snapshot.watts >= 0 ? "+" : "", snapshot.watts))
                         .font(.system(size: 11, weight: .medium))
                         .monospacedDigit()
-                        .foregroundStyle(Panel.secondary)
+                        .foregroundStyle(snapshot.isCharging ? tint : Panel.secondary)
                 }
 
                 MeterBar(fraction: Double(snapshot.percentage) / 100,
-                         tint: tint, segments: 4, height: 8)
+                         tint: tint, segments: 4, height: 8,
+                         isCharging: snapshot.isCharging)
             }
             .padding(14)
         }

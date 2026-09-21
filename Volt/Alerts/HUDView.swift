@@ -63,6 +63,9 @@ struct BatteryGlyph: View {
     var tint: Color = .green
     /// Draw the shell in the tint too, rather than in the label colour.
     var outlineTint: Bool = false
+    /// Puts a bolt through the middle. White with a dark halo, so it holds up both
+    /// over the coloured fill and over the empty part of the shell.
+    var isCharging: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -86,6 +89,15 @@ struct BatteryGlyph: View {
                 RoundedRectangle(cornerRadius: capWidth / 2)
                     .fill(outline)
                     .frame(width: capWidth, height: geo.size.height * 0.36)
+            }
+            .overlay(alignment: .leading) {
+                if isCharging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: geo.size.height * 0.72, weight: .black))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.55), radius: 1)
+                        .frame(width: bodyWidth)
+                }
             }
         }
     }

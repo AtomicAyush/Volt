@@ -21,6 +21,10 @@ three, so the icon and the readout can never disagree.
 **Charging lifecycle.** Optional alerts for charger connected, charger pulled, reaching
 80%, full charge, and the pack running hot.
 
+**Charging is obvious.** A bolt beside the percentage and inside the battery glyph, the
+state on a tinted chip, the wattage in the same colour, and a highlight running along
+the meter — movement being the one cue that reads as charging without being labelled.
+
 **A panel per topic.** Health, temperature, power, capacity, devices and energy are each
 their own panel, reached from a selector at the top rather than by scrolling past
 everything.
