@@ -101,12 +101,14 @@ struct LevelAlert: Codable, Identifiable, Equatable {
             ?? LevelAlert.defaultColor(for: level)
     }
 
-    /// Sensible colour for a threshold that predates the setting.
+    /// Sensible colour for a threshold with none saved. Spread across the range so a
+    /// set of alerts reads as escalating rather than all landing on the same amber.
     static func defaultColor(for level: Int) -> AlertColor {
         switch level {
         case ..<8: return .red
         case ..<15: return .orange
-        default: return .amber
+        case ..<35: return .amber
+        default: return .yellow
         }
     }
 }

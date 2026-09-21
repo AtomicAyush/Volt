@@ -42,10 +42,17 @@ app climbs well above its own baseline.
 ## Install
 
 ```bash
-xcodebuild -project Volt.xcodeproj -scheme Volt -configuration Release build
-cp -R ~/Library/Developer/Xcode/DerivedData/Volt-*/Build/Products/Release/Volt.app /Applications/
-open /Applications/Volt.app
+./install.sh
 ```
+
+That builds, signs and installs to `/Applications`, then launches.
+
+**Signing matters here.** macOS records Bluetooth permission against the app's code
+signature. An ad-hoc signature gets a fresh hash on every build, so each rebuild looks
+like a different app and macOS asks for Bluetooth access again — and the devices vanish
+until you grant it. `install.sh` signs with an Apple Development certificate if you have
+one, which gives a stable identity that is granted once and remembered. Without a
+certificate it falls back to ad-hoc and says so.
 
 Or open `Volt.xcodeproj` in Xcode and run. Volt lives in the menu bar and has no Dock
 icon or window of its own. Left-click the icon for the panel, right-click for a menu
@@ -79,11 +86,23 @@ Also not built: desktop widgets, and auto-dismissing macOS's own low-battery pop
 
 ## iPhone and iPad
 
-The live percentage comes from Bluetooth. An iPhone or iPad connected to the Mac
-exposes the standard GATT **Battery Service** (`0x180F`) with the **Battery Level**
-characteristic (`0x2A19`) — a public Bluetooth profile, nothing Apple-specific — so an
-ordinary `CBCentralManager` can read it. The device needs to be paired with the Mac and
-in range; no cable and no pairing record are required.
+The live percentage comes from Bluetooth. An iPhone or iPad exposes the standard GATT
+**Battery Service** (`0x180F`) with the **Battery Level** characteristic (`0x2A19`) — a
+public Bluetooth profile, nothing Apple-specific — so an ordinary `CBCentralManager` can
+read it. The device needs to be paired with the Mac and in range; no cable and no
+pairing record are required.
+
+Finding the device takes three routes, because no one of them is dependable. A phone
+that happens to be BLE-connected turns up through `retrieveConnectedPeripherals`, but
+that connection comes and goes with Continuity and is often absent even with the phone
+right there. Devices seen before are retrieved by identifier and given a connect request
+that stays pending until they are reachable, so they return on their own. Anything new
+has to be scanned for — and the scan cannot filter on the battery service, because an
+iPhone advertises Apple's own payload and never mentions `0x180F`. The scan is therefore
+unfiltered, and candidates are chosen from the advertisement.
+
+A reading is kept when the connection drops, marked as stale, rather than blanked: a
+phone flits in and out of range constantly and the panel would otherwise flicker.
 
 This is deliberately separate from the `MobileDevice.framework` path, which is used only
 for health, cycle count and lifetime stats and does need a cable.

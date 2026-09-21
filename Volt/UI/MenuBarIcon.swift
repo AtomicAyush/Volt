@@ -58,12 +58,14 @@ enum MenuBarIcon {
     /// knockout lands on something solid even where the battery is nearly empty —
     /// otherwise a number straddling the edge of the fill renders half dark, half light.
     private static func pill(snapshot: BatterySnapshot, showNumber: Bool, colored: Bool) -> NSImage {
-        let bodyWidth: CGFloat = showNumber ? 32 : 24
+        // Charging widens the shell so the bolt can sit inside it, alongside the
+        // digits, instead of being tacked on outside where it is easy to miss.
+        let charging = snapshot.isCharging
+        let bodyWidth: CGFloat = showNumber ? (charging ? 41 : 32) : 24
         let bodyHeight: CGFloat = 13.5
         let capWidth: CGFloat = 2
         let capGap: CGFloat = 1.5
-        let boltGap: CGFloat = snapshot.isCharging && showNumber ? 6.5 : 0
-        let width = bodyWidth + capGap + capWidth + boltGap
+        let width = bodyWidth + capGap + capWidth
 
         let image = NSImage(size: NSSize(width: width, height: height))
         image.lockFocus()
@@ -110,42 +112,48 @@ enum MenuBarIcon {
         }
 
         if showNumber {
+            let ink = colored ? contrasting(with: fill) : NSColor.black
+            let boltWidth: CGFloat = 7
+            let boltSpace: CGFloat = charging ? boltWidth + 2.5 : 0
+
             let text = "\(snapshot.percentage)"
             let size: CGFloat = text.count > 2 ? 9 : 10
             let font = NSFont.systemFont(ofSize: size, weight: .bold)
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: colored ? contrasting(with: fill) : NSColor.black
-            ]
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
             let bounds = text.size(withAttributes: attributes)
-            let origin = NSPoint(x: shell.midX - bounds.width / 2,
+
+            // Bolt on the left, digits centred in what is left of the shell.
+            let textCentre = shell.midX + boltSpace / 2
+            let origin = NSPoint(x: textCentre - bounds.width / 2,
                                  y: shell.midY - bounds.height / 2)
 
+            let drawInk = {
+                if charging {
+                    ink.setFill()
+                    boltPath(in: NSRect(x: shell.minX + 3, y: shell.midY - 5.5,
+                                        width: boltWidth, height: 11)).fill()
+                }
+                text.draw(at: origin, withAttributes: attributes)
+            }
+
             if colored {
-                text.draw(at: origin, withAttributes: attributes)
+                drawInk()
             } else {
-                // A template icon is a single colour plus alpha, so the digits are
-                // punched out of the solid fill instead of drawn on top of it.
+                // A template icon is a single colour plus alpha, so the ink is punched
+                // out of the solid fill instead of drawn on top of it.
                 NSGraphicsContext.current?.compositingOperation = .destinationOut
-                text.draw(at: origin, withAttributes: attributes)
+                drawInk()
                 NSGraphicsContext.current?.compositingOperation = .sourceOver
             }
         } else if snapshot.isCharging {
             // With no number to make room for, the bolt sits inside the shell.
-            let boltRect = NSRect(x: shell.midX - 2.5, y: shell.midY - 4.5, width: 5, height: 9)
+            let boltRect = NSRect(x: shell.midX - 3.5, y: shell.midY - 5.5, width: 7, height: 11)
             let levelRect = NSRect(x: inset.minX, y: inset.minY,
                                    width: max(1.5, inset.width * fraction), height: inset.height)
             overlay(in: levelRect, shell: shell) { knockout in
                 (knockout ? NSColor.black : NSColor.labelColor).setFill()
                 boltPath(in: boltRect).fill()
             }
-        }
-
-        // When the number is inside, the charging bolt goes after the cap.
-        if snapshot.isCharging && showNumber {
-            fill.setFill()
-            boltPath(in: NSRect(x: bodyWidth + capGap + capWidth + 0.8,
-                                y: height / 2 - 5, width: 5, height: 10)).fill()
         }
 
         image.unlockFocus()
@@ -175,15 +183,17 @@ enum MenuBarIcon {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    /// A deliberately chunky bolt. A thin one is unreadable at menu bar size, which is
+    /// the only size that matters here.
     private static func boltPath(in rect: NSRect) -> NSBezierPath {
         let w = rect.width, h = rect.height, x = rect.minX, y = rect.minY
         let path = NSBezierPath()
-        path.move(to: NSPoint(x: x + w * 0.70, y: y + h))
-        path.line(to: NSPoint(x: x + w * 0.02, y: y + h * 0.46))
-        path.line(to: NSPoint(x: x + w * 0.42, y: y + h * 0.46))
-        path.line(to: NSPoint(x: x + w * 0.30, y: y))
-        path.line(to: NSPoint(x: x + w * 0.98, y: y + h * 0.54))
-        path.line(to: NSPoint(x: x + w * 0.58, y: y + h * 0.54))
+        path.move(to: NSPoint(x: x + w * 0.88, y: y + h))
+        path.line(to: NSPoint(x: x + w * 0.00, y: y + h * 0.42))
+        path.line(to: NSPoint(x: x + w * 0.44, y: y + h * 0.42))
+        path.line(to: NSPoint(x: x + w * 0.12, y: y))
+        path.line(to: NSPoint(x: x + w * 1.00, y: y + h * 0.58))
+        path.line(to: NSPoint(x: x + w * 0.56, y: y + h * 0.58))
         path.close()
         return path
     }

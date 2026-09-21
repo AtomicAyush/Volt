@@ -76,7 +76,7 @@ final class DeviceMonitor: ObservableObject {
                 kind: .from(minorType: nil, name: reading.name),
                 cells: [.init(label: "", percent: reading.percent)],
                 isCharging: false,
-                isConnected: true,
+                isConnected: !reading.isStale,
                 note: nil
             )
             if let index = result.firstIndex(where: {

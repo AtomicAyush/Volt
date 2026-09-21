@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var lines = ["--- \(Date())"]
             lines.append("bluetooth state=\(ble.state.rawValue) ble=\(ble.batteries.map { "\($0.name):\($0.percent)%" })")
             lines.append("cabled=\(IOSDeviceMonitor.shared.devices.map { "\($0.name):\($0.percent)%" })")
+            lines.append("tracked(known \(ble.knownCount)): \(ble.trackedSummary)")
             for d in DeviceMonitor.shared.devices {
                 lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent)) note=\(d.note ?? "-")")
             }
