@@ -30,9 +30,14 @@ their own panel, reached from a selector at the top rather than by scrolling pas
 everything.
 
 **Power flow.** Plugged in, the adapter's output splits between charging the pack and
-running the Mac — shown as two bands whose thickness is their share, with the adapter's
-rating on one side and where the watts land on the other. On battery it is a single band
-flowing the other way.
+running the Mac — shown as two ribbons whose thickness is their share, with what the
+adapter is actually delivering on one side and where the watts land on the other. On
+battery it is a single ribbon flowing the other way.
+
+The headline figure is the delivered power, which moves with the load. The smaller one
+beneath it is the negotiated USB-C contract — the ceiling the Mac and charger agreed on,
+not what is printed on the brick. A 140W charger reports 100W there unless it negotiates
+the extended range.
 
 **Health.** Capacity against design capacity, cycle count, condition, temperature, live
 watts / volts / amps, and raw mAh. Where macOS reports its own "Maximum Capacity"

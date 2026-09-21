@@ -358,7 +358,8 @@ struct PowerCard: View {
                         .foregroundStyle(snapshot.isCharging ? Panel.green : Panel.amber)
 
                         if let watts = snapshot.adapterWatts, snapshot.isPluggedIn {
-                            Text("\(watts)W adapter")
+                            // The negotiated ceiling, not the charger's rating.
+                            Text("\(watts)W negotiated")
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(Panel.secondary)
                         } else {
