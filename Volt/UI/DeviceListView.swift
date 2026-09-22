@@ -105,8 +105,8 @@ struct DeviceRow: View {
 
     private func tint(_ percent: Int) -> Color {
         switch percent {
-        case ..<16: return .red
-        case ..<31: return .orange
+        case ...25: return .red
+        case ..<35: return .orange
         default: return .green
         }
     }

@@ -43,8 +43,8 @@ enum MenuBarIcon {
         guard colored else { return .labelColor }
         if charging { return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1) }
         switch percent {
-        case ..<11: return NSColor(red: 1.00, green: 0.27, blue: 0.23, alpha: 1)
-        case ..<21: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)
+        case ...25: return NSColor(red: 1.00, green: 0.27, blue: 0.23, alpha: 1)
+        case ..<35: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)
         default: return .labelColor
         }
     }

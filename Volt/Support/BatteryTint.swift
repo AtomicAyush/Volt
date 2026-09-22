@@ -27,8 +27,8 @@ enum BatteryTint {
     /// Used above every configured alert level.
     static func defaultScale(_ percentage: Int) -> AlertColor {
         switch percentage {
-        case ..<10: return .red
-        case ..<20: return .orange
+        // A quarter charge or less is red, however it got there.
+        case ...25: return .red
         case ..<35: return .amber
         case ..<60: return .lime
         default: return .green

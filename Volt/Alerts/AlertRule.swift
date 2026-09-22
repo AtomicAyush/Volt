@@ -105,8 +105,7 @@ struct LevelAlert: Codable, Identifiable, Equatable {
     /// set of alerts reads as escalating rather than all landing on the same amber.
     static func defaultColor(for level: Int) -> AlertColor {
         switch level {
-        case ..<8: return .red
-        case ..<15: return .orange
+        case ...25: return .red
         case ..<35: return .amber
         // Not yellow: that is Low Power Mode's colour, and a default alert colour that
         // matched it would make the mode impossible to spot.
