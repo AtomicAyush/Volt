@@ -43,6 +43,10 @@ final class HUDPresenter {
         let content = HUDView(title: title, message: body, level: level,
                               accent: accent, symbol: symbol)
         let hosting = NSHostingView(rootView: content)
+        // Every layer behind the pill is explicitly clear. The window is larger than the
+        // pill to leave room for the glow, and nothing should ever paint that margin.
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
         hosting.layout()
         let size = hosting.fittingSize
 
@@ -53,9 +57,15 @@ final class HUDPresenter {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.level = .screenSaver
-        panel.ignoresMouseEvents = false
+        // Click-through. A notification should never get in the way of the app beneath
+        // it, and while it accepted events, scrolling over it made macOS treat it as the
+        // active scroll target and draw its bounds as a box around the pill.
+        panel.ignoresMouseEvents = true
+        panel.isMovable = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.contentView = hosting
+        panel.contentView?.superview?.wantsLayer = true
+        panel.contentView?.superview?.layer?.backgroundColor = NSColor.clear.cgColor
         panel.alphaValue = 0
 
         // Centred on the active screen, a little above the midpoint so it does not
