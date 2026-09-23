@@ -74,7 +74,10 @@ final class DeviceMonitor: ObservableObject {
             return device
         }
 
-        if let remembered = lastKnown[key] {
+        // Beyond half a day the remembered level says nothing useful — AirPods left in
+        // a case read 1% a day later — so the device is listed without a number instead.
+        if let remembered = lastKnown[key],
+           Date().timeIntervalSince(remembered.seen) < 12 * 3600 {
             var filled = device
             filled = DeviceBattery(id: device.id, name: device.name, kind: device.kind,
                                    cells: remembered.cells, isCharging: false,

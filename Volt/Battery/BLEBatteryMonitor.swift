@@ -130,13 +130,15 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         for peripheral in central.retrieveConnectedPeripherals(withServices: [Self.batteryService]) {
             // This path had no filter, and it is how a pair of headphones nobody was
             // using ended up connected to and listed.
-            guard Self.isWanted(peripheral.name) else { continue }
+            guard qualifies(peripheral) == true else { continue }
             adopt(peripheral)
         }
 
         if !knownIdentifiers.isEmpty {
             for peripheral in central.retrievePeripherals(withIdentifiers: Array(knownIdentifiers)) {
-                guard Self.isWanted(peripheral.name) else {
+                // Only drop it when the name is known and wrong. A device that has
+                // answered before keeps its place while it is off or out of range.
+                if qualifies(peripheral) == false {
                     forget(peripheral.identifier)
                     continue
                 }
@@ -144,7 +146,7 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
             }
         }
 
-        for peripheral in Array(peripherals.values) where !Self.isWanted(peripheral.name) {
+        for peripheral in Array(peripherals.values) where qualifies(peripheral) == false {
             forget(peripheral.identifier)
         }
 
@@ -175,10 +177,32 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     /// are read from their broadcasts instead, without connecting at all.
     private static let wanted = ["iphone", "ipad", "ipod"]
 
-    private static func isWanted(_ name: String?) -> Bool {
+    static func isWanted(_ name: String?) -> Bool {
         let lowered = (name ?? "").lowercased()
         guard !lowered.isEmpty else { return false }
         return wanted.contains { lowered.contains($0) }
+    }
+
+    /// The last name seen for each device. A peripheral that is switched off or out of
+    /// range often reports no name at all, and a device must never be dropped just
+    /// because its name is momentarily unavailable — that is what happened when a phone
+    /// ran flat: it was forgotten while off and never came back.
+    private var lastKnownNames: [UUID: String] = [:]
+
+    /// nil means "no opinion" — nothing is known about this device's name, so it must
+    /// not be dropped on that basis.
+    static func decide(name: String?, remembered: String?) -> Bool? {
+        if let name, !name.isEmpty { return isWanted(name) }
+        if let remembered, !remembered.isEmpty { return isWanted(remembered) }
+        return nil
+    }
+
+    private func qualifies(_ peripheral: CBPeripheral) -> Bool? {
+        if let name = peripheral.name, !name.isEmpty {
+            lastKnownNames[peripheral.identifier] = name
+        }
+        return Self.decide(name: peripheral.name,
+                           remembered: lastKnownNames[peripheral.identifier])
     }
 
     private func isCandidate(_ peripheral: CBPeripheral, advertisement: [String: Any]) -> Bool {
@@ -266,6 +290,10 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         captureAdvertisement(peripheral, advertisementData, rssi: RSSI)
+        if let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
+            ?? peripheral.name, !name.isEmpty {
+            lastKnownNames[peripheral.identifier] = name
+        }
         guard isCandidate(peripheral, advertisement: advertisementData) else { return }
         adopt(peripheral)
     }
