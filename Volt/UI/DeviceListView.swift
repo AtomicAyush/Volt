@@ -50,6 +50,13 @@ struct DeviceRow: View {
                     .lineLimit(1)
                     .foregroundStyle(device.isConnected ? .primary : .secondary)
 
+                if device.isCharging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Panel.green)
+                        .accessibilityLabel("Charging")
+                }
+
                 // Only meaningful where a level exists and has gone stale.
                 if !device.isConnected && device.hasReading {
                     Text("last seen")

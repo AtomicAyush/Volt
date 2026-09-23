@@ -7,6 +7,13 @@ struct ContinuityReading: Equatable {
     let primary: Int?
     let secondary: Int?
     let caseLevel: Int?
+    /// The low nibble of the case byte carries charging flags, one bit per part.
+    let primaryCharging: Bool
+    let secondaryCharging: Bool
+    let caseCharging: Bool
+
+    /// True when any part of the device is taking charge.
+    var isCharging: Bool { primaryCharging || secondaryCharging || caseCharging }
     let rssi: Int
     let seen: Date
 }
@@ -39,10 +46,18 @@ enum ContinuityDecoder {
         let pods = bytes[8]
         let casing = bytes[9]
 
+        // Every bit set is how this format says "unknown" for the level nibbles, and the
+        // flag nibble reads 0xF on devices that are plainly not all charging at once, so
+        // it is taken the same way here: no information rather than three bolts.
+        let flags = casing & 0x0F
+        let flagsKnown = flags != 0x0F
         return ContinuityReading(model: model,
                                  primary: level(pods >> 4),
                                  secondary: level(pods & 0x0F),
                                  caseLevel: level(casing >> 4),
+                                 primaryCharging: flagsKnown && flags & 0x02 != 0,
+                                 secondaryCharging: flagsKnown && flags & 0x01 != 0,
+                                 caseCharging: flagsKnown && flags & 0x04 != 0,
                                  rssi: rssi,
                                  seen: Date())
     }

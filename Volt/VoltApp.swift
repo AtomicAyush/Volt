@@ -102,11 +102,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lines.append("cabled=\(IOSDeviceMonitor.shared.devices.map { "\($0.name):\($0.percent)%" })")
             lines.append("tracked(known \(ble.knownCount)): \(ble.trackedSummary)")
             for (model, r) in ble.continuity.sorted(by: { $0.key < $1.key }) {
-                lines.append(String(format: "  continuity 0x%04x: %@/%@/%@ rssi=%d",
+                lines.append(String(format: "  continuity 0x%04x: %@/%@/%@ charging L=%@ R=%@ case=%@ rssi=%d",
                                     model,
                                     r.primary.map { "\($0)%" } ?? "-",
                                     r.secondary.map { "\($0)%" } ?? "-",
                                     r.caseLevel.map { "\($0)%" } ?? "-",
+                                    r.primaryCharging ? "Y" : "n",
+                                    r.secondaryCharging ? "Y" : "n",
+                                    r.caseCharging ? "Y" : "n",
                                     r.rssi))
             }
             for d in DeviceMonitor.shared.devices {

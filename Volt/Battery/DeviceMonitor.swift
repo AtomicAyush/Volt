@@ -228,7 +228,7 @@ final class DeviceMonitor: ObservableObject {
         guard !cells.isEmpty else { return device }
 
         return DeviceBattery(id: device.id, name: device.name, kind: device.kind,
-                             cells: cells, isCharging: false, isConnected: true,
+                             cells: cells, isCharging: reading.isCharging, isConnected: true,
                              note: nil, model: device.model, isApproximate: true)
     }
 
