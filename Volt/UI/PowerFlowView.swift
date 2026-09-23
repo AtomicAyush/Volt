@@ -96,6 +96,9 @@ struct PowerFlowView: View {
                 flow
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    // Above the clip: the rolling digits travel a little past their own
+                    // bounds as they change, and inside the clip that got cut off.
+                    .overlay { labels }
 
                 VStack(spacing: boxGap) {
                     if snapshot.isCharging {
@@ -192,16 +195,34 @@ struct PowerFlowView: View {
                                                       Color.white.opacity(0.24)],
                                              startPoint: .leading, endPoint: .trailing))
 
-                    watts(toBattery, at: CGPoint(x: geo.size.width / 2,
-                                                 y: h * (split + 0) / 2 + 3))
-                    watts(toSystem, at: CGPoint(x: geo.size.width / 2,
-                                                y: h * (split + 1) / 2 + 2))
                 } else {
                     FlowBand(leftTop: 0, leftBottom: 1, rightTop: 0, rightBottom: 1)
                         .fill(LinearGradient(colors: [tint.opacity(0.30), tint.opacity(0.65)],
                                              startPoint: .leading, endPoint: .trailing))
-                    watts(toSystem, at: CGPoint(x: geo.size.width / 2, y: h / 2))
                 }
+            }
+        }
+    }
+
+    /// The wattage labels, centred on each ribbon where it crosses the middle of the
+    /// diagram rather than at its left edge, where the thinner ribbon is thinnest.
+    private var labels: some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            let centreX = geo.size.width / 2
+            // With the control points level with their endpoints, the divider crosses
+            // the middle exactly halfway between where it starts and where it ends.
+            let gap = boxGap / h
+            let divider = h * (split + (midpoint - gap / 2)) / 2
+            let margin: CGFloat = 12
+
+            if snapshot.isCharging {
+                watts(toBattery, at: CGPoint(x: centreX,
+                                             y: min(max(divider / 2, margin), h - margin)))
+                watts(toSystem, at: CGPoint(x: centreX,
+                                            y: min(max((divider + h) / 2, margin), h - margin)))
+            } else {
+                watts(toSystem, at: CGPoint(x: centreX, y: h / 2))
             }
         }
     }
