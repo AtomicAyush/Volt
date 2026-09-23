@@ -8,6 +8,11 @@ struct BLEBattery: Identifiable, Equatable {
     let name: String
     let percent: Int
     let updated: Date
+    /// True only when the level has been seen to rise. An iPhone publishes its battery
+    /// level and nothing else — no charging state — so a rise is the only evidence
+    /// available, and a steady level is left as "not known to be charging" rather than
+    /// claimed as idle.
+    var isCharging: Bool = false
     /// True once the device has dropped its connection. The last level is kept rather
     /// than discarded: a phone flits in and out of range constantly, and blanking the
     /// reading each time would make the panel flicker between a number and an excuse.
@@ -46,6 +51,9 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     /// identifiers are stable per Mac, so remembering them lets Volt reconnect
     /// without having to rediscover the device by scanning.
     private var knownIdentifiers: Set<UUID> = []
+
+    /// Last level seen per device, to spot the level rising.
+    private var levelHistory: [UUID: (percent: Int, seen: Date)] = [:]
 
     /// Strongest Continuity reading seen for each model, keyed by model number.
     private var continuityByModel: [UInt16: ContinuityReading] = [:]
@@ -376,11 +384,32 @@ extension BLEBatteryMonitor: CBPeripheralDelegate {
               let raw = data.first else { return }
 
         let name = peripheral.name ?? "Bluetooth Device"
+        let percent = Int(min(raw, 100))
         remember(peripheral.identifier)
+
+        // A rise means charging. A fall means it is not. An unchanged level says
+        // nothing either way, so the last conclusion stands until it expires — a phone
+        // sitting at 100% on a charger never rises again.
+        var charging = levels[peripheral.identifier]?.isCharging ?? false
+        if let previous = levelHistory[peripheral.identifier] {
+            if percent > previous.percent {
+                charging = true
+                levelHistory[peripheral.identifier] = (percent, Date())
+            } else if percent < previous.percent {
+                charging = false
+                levelHistory[peripheral.identifier] = (percent, Date())
+            } else if charging, Date().timeIntervalSince(previous.seen) > 45 * 60 {
+                charging = false      // no rise in three quarters of an hour
+            }
+        } else {
+            levelHistory[peripheral.identifier] = (percent, Date())
+        }
+
         levels[peripheral.identifier] = BLEBattery(id: peripheral.identifier,
                                                    name: name,
-                                                   percent: Int(min(raw, 100)),
+                                                   percent: percent,
                                                    updated: Date(),
+                                                   isCharging: charging,
                                                    isStale: false)
         publish()
     }

@@ -246,7 +246,7 @@ final class DeviceMonitor: ObservableObject {
                 name: reading.name,
                 kind: .from(minorType: nil, name: reading.name),
                 cells: [.init(label: "", percent: reading.percent)],
-                isCharging: false,
+                isCharging: reading.isCharging,
                 isConnected: !reading.isStale,
                 note: nil
             )

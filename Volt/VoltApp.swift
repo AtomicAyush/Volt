@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     r.rssi))
             }
             for d in DeviceMonitor.shared.devices {
-                lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent)) note=\(d.note ?? "-")")
+                lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent))\(d.isCharging ? " CHARGING" : "") note=\(d.note ?? "-")")
             }
             let text = lines.joined(separator: "\n") + "\n"
             if let data = text.data(using: .utf8) {
