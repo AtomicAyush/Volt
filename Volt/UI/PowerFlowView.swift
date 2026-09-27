@@ -261,7 +261,14 @@ struct PowerFlowView: View {
 
     private var headline: String {
         if snapshot.isCharging { return String(format: "Charging at %.0f W", toBattery) }
-        if snapshot.isPluggedIn { return String(format: "Running on AC at %.0f W", toSystem) }
+        if snapshot.isPluggedIn {
+            // The adapter is not keeping up and the battery is making up the rest, so say
+            // so; otherwise the system figure would exceed the plug's with no source.
+            if snapshot.watts < -0.5 {
+                return String(format: "On AC · battery adding %.0f W", -snapshot.watts)
+            }
+            return String(format: "Running on AC at %.0f W", toSystem)
+        }
         return String(format: "On battery · %.0f W", toSystem)
     }
 

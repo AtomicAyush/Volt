@@ -111,7 +111,16 @@ final class BatteryMonitor: ObservableObject {
         guard IORegistryEntryCreateCFProperties(service, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
               let props = unmanaged?.takeRetainedValue() as? [String: Any] else { return s }
 
-        func int(_ key: String) -> Int? { props[key] as? Int }
+        // macOS 27 restructured the battery. What was one flat entry is now a tree —
+        // battery, pack, banks, cells — and many figures moved: capacities into the
+        // entry's BatteryData, and temperature and the raw capacities onto the child
+        // AppleSmartBatteryPack. Each key is looked for in the old place first, so
+        // macOS 26 reads exactly as before, then in the new ones.
+        let batteryData = props["BatteryData"] as? [String: Any] ?? [:]
+        let packData = Self.packBatteryData()
+        func int(_ key: String) -> Int? {
+            (props[key] as? Int) ?? (batteryData[key] as? Int) ?? (packData[key] as? Int)
+        }
         func bool(_ key: String) -> Bool { (props[key] as? Bool) ?? false }
 
         s.isPresent = bool("BatteryInstalled")
@@ -123,32 +132,46 @@ final class BatteryMonitor: ObservableObject {
         s.cycleCount = int("CycleCount") ?? 0
         s.designCapacity = int("DesignCapacity") ?? 0
         s.nominalChargeCapacity = int("NominalChargeCapacity") ?? 0
-        s.rawMaxCapacity = int("AppleRawMaxCapacity") ?? 0
-        s.rawCurrentCapacity = int("AppleRawCurrentCapacity") ?? 0
+        s.rawMaxCapacity = int("AppleRawMaxCapacity") ?? int("FullChargeCapacity") ?? 0
+        s.rawCurrentCapacity = int("AppleRawCurrentCapacity") ?? int("RemainingCapacity") ?? 0
 
         // Temperature arrives in hundredths of a degree Celsius.
-        if let t = int("Temperature") { s.temperatureC = Double(t) / 100 }
+        if let t = int("Temperature"), t > 0 {
+            s.temperatureC = Double(t) / 100
+        } else if let sensor = SMC.shared.float("TB0T"), sensor > 0, sensor < 100 {
+            // Last resort: the pack's own temperature sensor.
+            s.temperatureC = sensor
+        }
         if let v = int("Voltage") { s.voltage = Double(v) / 1000 }
         if let a = int("Amperage") { s.amperage = Double(a) / 1000 }
 
         let raw = s.isPluggedIn ? int("AvgTimeToFull") : int("AvgTimeToEmpty")
         s.minutesRemaining = Self.sanitize(raw)
 
+        // The negotiated wattage has lived in AdapterDetails; the raw adapter list is
+        // the fallback in case it moves the way the battery figures did.
+        let rawAdapter = (props["AppleRawAdapterDetails"] as? [[String: Any]])?.first
+        if s.adapterWatts == nil, let watts = rawAdapter?["Watts"] as? Int, watts > 0 {
+            s.adapterWatts = watts
+        }
         if let adapter = props["AdapterDetails"] as? [String: Any] {
-            s.adapterWatts = adapter["Watts"] as? Int
+            s.adapterWatts = (adapter["Watts"] as? Int) ?? s.adapterWatts
             s.adapterName = (adapter["Name"] as? String) ?? (adapter["Description"] as? String)
         }
 
         // The gauge publishes both sides of the power split, which is what makes a
         // flow diagram possible: what the adapter is delivering, and what the Mac is
-        // drawing. The rest goes into the battery.
+        // drawing. The rest goes into the battery. These are slow fallbacks; the SMC
+        // below supplies the live figures.
         if let data = props["BatteryData"] as? [String: Any] {
             s.adapterPower = data["AdapterPower"] as? Double
             s.systemPower = data["SystemPower"] as? Double
         }
-        if let telemetry = props["PowerTelemetryData"] as? [String: Any],
-           let lossMilliwatts = telemetry["AdapterEfficiencyLoss"] as? Int {
-            s.conversionLoss = Double(lossMilliwatts) / 1000
+        // macOS 27 dropped both of those and reports the system draw here, in mW.
+        if s.systemPower == nil,
+           let telemetry = props["PowerTelemetryData"] as? [String: Any],
+           let milliwatts = telemetry["SystemLoad"] as? Int, milliwatts > 0 {
+            s.systemPower = Double(milliwatts) / 1000
         }
 
         applySMC(to: &s)
@@ -166,9 +189,9 @@ final class BatteryMonitor: ObservableObject {
         if let millivolts = smc.uint16("B0AV"), millivolts > 1000 {
             s.voltage = Double(millivolts) / 1000
         }
-        // PDTR is what the adapter is putting in. PSTR is deliberately not used for
-        // the system figure: it swings between 5 and 20 W with no relation to the 9 W
-        // actually leaving the pack, so it is measuring something else.
+        // PDTR is what the adapter is putting in. PSTR is not used for the system figure:
+        // on AC it is the same power-in-less-battery sum `load` works out, but a tick
+        // behind, and on battery it bears no relation to what is leaving the pack.
         if let adapterIn = smc.float("PDTR"), adapterIn > 0 { s.adapterPower = adapterIn }
         if let batteryPower = smc.float("PPBR") { s.batteryPower = batteryPower }
     }
@@ -211,6 +234,19 @@ final class BatteryMonitor: ObservableObject {
         guard (s.isCharging && current > 0) || (!s.isCharging && current < 0) else { return }
         let minutes = milliampHours / (abs(current) * 1000) * 60
         s.minutesRemaining = Self.sanitize(Int(minutes.rounded()))
+    }
+
+    /// The BatteryData of the AppleSmartBatteryPack child entry, where macOS 27 keeps
+    /// temperature and the raw capacities. Empty on systems without it.
+    private static func packBatteryData() -> [String: Any] {
+        let pack = IOServiceGetMatchingService(kIOMainPortDefault,
+                                               IOServiceMatching("AppleSmartBatteryPack"))
+        guard pack != IO_OBJECT_NULL else { return [:] }
+        defer { IOObjectRelease(pack) }
+        var unmanaged: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(pack, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let props = unmanaged?.takeRetainedValue() as? [String: Any] else { return [:] }
+        return props["BatteryData"] as? [String: Any] ?? [:]
     }
 
     /// IOPowerSources knows a few things the raw registry does not, and agrees with `pmset`.

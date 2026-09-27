@@ -197,12 +197,12 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 
 | Data | Source |
 | --- | --- |
-| Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry |
+| Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry — on macOS 27 also its `BatteryData` and that of the `AppleSmartBatteryPack` child — with `AppleSMC` `TB0T` as a temperature fallback |
 | Current, voltage, adapter input | `AppleSMC` keys `B0AC`, `B0AV`, `PDTR`, `PPBR` |
-| Adapter output fallback | `BatteryData.AdapterPower` |
+| Adapter and system power fallback | `BatteryData.AdapterPower` / `SystemPower`; on macOS 27, `PowerTelemetryData.SystemLoad` |
 | Change notifications | `IOPSNotificationCreateRunLoopSource`, plus a `kIOGeneralInterest` notification on the battery itself |
 | Condition, Apple's Maximum Capacity | `system_profiler SPPowerDataType`, every 15 min |
-| AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType` |
+| AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType`, IOBluetooth, and AirPods' own Continuity advertisements through CoreBluetooth |
 | Magic Mouse / Keyboard / Trackpad | `ioreg -k BatteryPercent` |
 | Per-app energy | `top -stats pid,cpu,power,command` |
 | iPhone / iPad level | CoreBluetooth GATT `0x180F` / `0x2A19` |
@@ -223,4 +223,4 @@ Alerts are shown as Volt's own on-screen HUD rather than through Notification Ce
 because an ad-hoc signed build cannot reliably obtain notification authorization.
 Notification Center delivery is available as an option in Settings.
 
-Requires macOS 14 or later. Built and tested on macOS 26 with Xcode 27.
+Requires macOS 14 or later. Built with Xcode 27 and tested on macOS 26 and macOS 27.

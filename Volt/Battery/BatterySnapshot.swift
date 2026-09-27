@@ -32,9 +32,6 @@ struct BatterySnapshot: Equatable {
     /// Power in or out of the pack, straight from the controller. Only meaningful on
     /// battery: it measures discharge and reads under a watt while charging at sixty.
     var batteryPower: Double?
-    /// Watts lost converting the adapter's supply, which belong to neither the battery
-    /// nor the Mac.
-    var conversionLoss: Double?
 
     /// "Normal", "Service Recommended", ... as reported by macOS.
     var condition: String?
@@ -62,15 +59,17 @@ struct BatterySnapshot: Equatable {
     ///
     /// On battery that is simply the discharge: everything leaving the pack is running
     /// the Mac. Plugged in it is whatever the adapter delivers beyond what the battery
-    /// is taking.
+    /// is taking — plus whatever the battery is adding, when the Mac is drawing more
+    /// than the adapter supplies.
     ///
-    /// Checked against the gauge: 86 W in, 58 W into the pack and 2.6 W lost converting
-    /// leaves 25.4 W, which is exactly the system draw it reports — but that figure lags,
-    /// whereas this one moves with the live readings.
+    /// This is exactly how the gauge works out its own system load on macOS 27: power
+    /// in at the port less battery power, with no deduction for conversion loss, which
+    /// happens inside the adapter before the port. The gauge's figure only updates
+    /// about once a minute, whereas this one moves with the live readings.
     var load: Double {
         guard isPluggedIn else { return abs(min(0, watts)) }
         if let adapterPower, adapterPower > 0 {
-            return max(0, adapterPower - chargePower - (conversionLoss ?? 0))
+            return max(0, adapterPower - watts)
         }
         if let systemPower, systemPower > 0 { return systemPower }
         return abs(min(0, watts))
