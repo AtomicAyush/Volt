@@ -41,6 +41,14 @@ struct DisabledCard: View {
     }
 }
 
+/// What the panel should look like when it next opens. The panel's view is built
+/// afresh on every open, so choices made in it are kept here rather than in view state.
+enum PopoverMemory {
+    static var tab: PanelTab = .battery
+    static var energyWindow: EnergyWindow = .live
+    static var contentHeight: CGFloat = 520
+}
+
 /// The panel that drops out of the menu bar: current charge at the top, then
 /// collapsible cards for health, accessories and what is draining the battery.
 struct PopoverView: View {
@@ -51,11 +59,11 @@ struct PopoverView: View {
     @ObservedObject private var devices = DeviceMonitor.shared
     @ObservedObject private var prefs = Preferences.shared
 
-    @State private var tab: PanelTab = .battery
+    @State private var tab = PopoverMemory.tab
 
     /// Measured height of the card column, so the popover is exactly as tall as it
     /// needs to be and grows as sections are expanded.
-    @State private var contentHeight: CGFloat = 520
+    @State private var contentHeight = PopoverMemory.contentHeight
 
     private let minHeight: CGFloat = 320
     private let maxHeight: CGFloat = 760
@@ -100,9 +108,11 @@ struct PopoverView: View {
         }
         .frame(width: 348)
         .frame(height: min(max(contentHeight, minHeight), maxHeight))
+        .onChange(of: tab) { _, tab in PopoverMemory.tab = tab }
         .onPreferenceChange(ContentHeightKey.self) { height in
             guard height > 0 else { return }
             contentHeight = height
+            PopoverMemory.contentHeight = height
         }
         .background(Panel.background)
         .environment(\.colorScheme, .dark)
@@ -446,7 +456,7 @@ struct DevicesCard: View {
 
 struct EnergyCard: View {
     @ObservedObject private var monitor = EnergyMonitor.shared
-    @State private var window: EnergyWindow = .live
+    @State private var window = PopoverMemory.energyWindow
 
     var body: some View {
         Card {
@@ -458,6 +468,7 @@ struct EnergyCard: View {
                 Segments(options: EnergyWindow.allCases,
                          title: { $0.rawValue },
                          selection: $window)
+                    .onChange(of: window) { _, window in PopoverMemory.energyWindow = window }
 
                 if !monitor.callouts.isEmpty {
                     HStack(alignment: .top, spacing: 6) {

@@ -7,9 +7,11 @@ import Combine
 /// An `NSStatusItem` is used rather than SwiftUI's `MenuBarExtra` so the icon can be a
 /// custom-drawn, optionally coloured image whose width changes with the style.
 @MainActor
-final class StatusItemController: NSObject, NSPopoverDelegate {
+final class StatusItemController: NSObject, NSPopoverDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
+    /// Holds the panel's view only while it is open; see `popoverDidClose`.
+    private let popoverContent = NSHostingController(rootView: AnyView(EmptyView()))
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
 
@@ -22,10 +24,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(
-            rootView: PopoverView(openSettings: { [weak self] in self?.openSettings() },
-                                  quit: { NSApp.terminate(nil) })
-        )
+        popover.contentViewController = popoverContent
 
         BatteryMonitor.shared.$snapshot
             .receive(on: RunLoop.main)
@@ -95,9 +94,20 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             BatteryMonitor.shared.refresh()
             DeviceMonitor.shared.refresh()
             EnergyMonitor.shared.sample()
+            popoverContent.rootView = AnyView(
+                PopoverView(openSettings: { [weak self] in self?.openSettings() },
+                            quit: { NSApp.terminate(nil) })
+            )
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+
+    /// A closed panel's view stays in its window, still following every reading and
+    /// running its animations. Dropping it once the panel is gone stops all of that; it
+    /// is built again, with fresh readings, the next time the panel opens.
+    func popoverDidClose(_ notification: Notification) {
+        popoverContent.rootView = AnyView(EmptyView())
     }
 
     private func showContextMenu() {
@@ -140,9 +150,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         window.setContentSize(NSSize(width: 760, height: 580))
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = self
         settingsWindow = window
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Settings is built afresh each time it opens, so a closed one is let go rather
+    /// than kept updating in the background.
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === settingsWindow else { return }
+        settingsWindow = nil
     }
 }

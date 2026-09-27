@@ -61,8 +61,6 @@ struct MeterBar: View {
     /// "charging" without having to be labelled.
     var isCharging: Bool = false
 
-    @State private var shimmer = false
-
     var body: some View {
         GeometryReader { geo in
             let filled = max(height, geo.size.width * min(1, max(0, fraction)))
@@ -71,21 +69,10 @@ struct MeterBar: View {
                 Capsule()
                     .fill(tint)
                     .frame(width: filled)
-                    .overlay(alignment: .leading) {
-                        if isCharging {
-                            LinearGradient(colors: [.clear, .white.opacity(0.55), .clear],
-                                           startPoint: .leading, endPoint: .trailing)
-                                .frame(width: filled * 0.4)
-                                .offset(x: shimmer ? filled : -filled * 0.4)
-                        }
+                    .overlay {
+                        if isCharging { ChargingSweep() }
                     }
                     .clipShape(Capsule())
-                    .onAppear {
-                        guard isCharging else { return }
-                        withAnimation(.linear(duration: 1.7).repeatForever(autoreverses: false)) {
-                            shimmer = true
-                        }
-                    }
 
                 if segments > 1 {
                     HStack(spacing: 0) {
@@ -101,6 +88,62 @@ struct MeterBar: View {
             }
         }
         .frame(height: height)
+    }
+}
+
+/// The highlight that runs along a charging bar.
+///
+/// A SwiftUI animation here cost about 14% CPU, because SwiftUI works out every frame
+/// in Volt's own process — and it kept doing so after the panel had closed. A Core
+/// Animation sweep is played by the window server instead, and measured at 0%.
+private struct ChargingSweep: NSViewRepresentable {
+    func makeNSView(context: Context) -> SweepView { SweepView() }
+    func updateNSView(_ view: SweepView, context: Context) {}
+
+    final class SweepView: NSView {
+        /// Seconds for the highlight to cross the bar once.
+        private static let duration: CFTimeInterval = 1.7
+        private let highlight = CAGradientLayer()
+        private var sweptWidth: CGFloat = 0
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.masksToBounds = true
+            // Fades to transparent white, not `.clear`: that is transparent black, and the
+            // gradient would pass through grey on its way to the highlight.
+            highlight.colors = [0, 0.55, 0].map { NSColor.white.withAlphaComponent($0).cgColor }
+            highlight.startPoint = CGPoint(x: 0, y: 0.5)
+            highlight.endPoint = CGPoint(x: 1, y: 0.5)
+            layer?.addSublayer(highlight)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func layout() {
+            super.layout()
+            let width = bounds.width
+            // Layout runs on every reading; restarting the sweep each time would make
+            // it jump, so it is only rebuilt when the bar's length actually changes.
+            guard width != sweptWidth else { return }
+            sweptWidth = width
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            highlight.frame = CGRect(x: -width * 0.4, y: 0, width: width * 0.4, height: bounds.height)
+            CATransaction.commit()
+
+            highlight.removeAllAnimations()
+            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+            let sweep = CABasicAnimation(keyPath: "transform.translation.x")
+            sweep.fromValue = 0
+            sweep.toValue = width * 1.4
+            sweep.duration = Self.duration
+            sweep.repeatCount = .infinity
+            highlight.add(sweep, forKey: "sweep")
+        }
     }
 }
 
