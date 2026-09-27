@@ -82,9 +82,15 @@ final class IOSDeviceMonitor: ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// Set once the device notifications are subscribed to.
+    private var isSubscribed = false
+
     func start() {
-        guard load() else { return }
+        // Tracking can be switched off and on again: the subscription lasts for the
+        // process, and only the timer comes and goes.
+        guard timer == nil, load() else { return }
         isAvailable = true
+        defer { isSubscribed = true }
 
         // Ask for devices reachable over Wi-Fi as well as the cable. A device that
         // has been paired once over USB, with Wi-Fi sync enabled, keeps answering
@@ -113,10 +119,12 @@ final class IOSDeviceMonitor: ObservableObject {
             }
         }
 
-        if let subscribeWithOptions {
-            _ = subscribeWithOptions(callback, 0, 0, nil, &token, options as CFDictionary)
-        } else {
-            _ = subscribe?(callback, 0, 0, nil, &token)
+        if !isSubscribed {
+            if let subscribeWithOptions {
+                _ = subscribeWithOptions(callback, 0, 0, nil, &token, options as CFDictionary)
+            } else {
+                _ = subscribe?(callback, 0, 0, nil, &token)
+            }
         }
 
         // Battery moves slowly; re-read now and then. The sweep also picks up

@@ -359,6 +359,7 @@ struct DeviceSettings: View {
                             DeviceMonitor.shared.start()
                         } else {
                             BLEBatteryMonitor.shared.stop()
+                            IOSDeviceMonitor.shared.stop()
                             DeviceMonitor.shared.stop()
                         }
                     }
@@ -376,7 +377,7 @@ struct DeviceSettings: View {
             } header: {
                 Text("Accessories").font(.system(size: 12, weight: .semibold))
             } footer: {
-                Text("AirPods levels come from the Bluetooth framework — the same figures the Sound menu shows. iPhone and iPad are read from their Bluetooth battery service and need to be paired and nearby.")
+                Text("AirPods levels come from macOS's own Bluetooth report — the figures the Sound menu shows — or, when it has none, from what the AirPods broadcast. iPhone and iPad are read from their Bluetooth battery service and need to be paired and nearby.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -571,7 +572,7 @@ struct AboutSettings: View {
 
                     detail("Written in Swift, with SwiftUI for the panel and settings and AppKit for the menu bar item, the alert overlay and the icon, which is drawn by hand rather than assembled from system symbols.")
                     detail("Charge, health, cycle count and temperature are read from IOKit's AppleSmartBattery entry. Current, voltage and adapter power come from the System Management Controller, which refreshes about once a second — the battery entry itself can go eight seconds or more between updates.")
-                    detail("iPhone and iPad report their battery over Bluetooth, through the standard GATT battery service, so no cable is needed. AirPods levels come from the Bluetooth framework — the same figures the Sound menu shows — with their own broadcasts as a fallback.")
+                    detail("iPhone and iPad report their battery over Bluetooth, through the standard GATT battery service, so no cable is needed. AirPods levels come from macOS's own Bluetooth report — the figures the Sound menu shows — and, where it has none, from the battery the AirPods broadcast, decoded with a method checked against macOS's own reading of the same broadcasts.")
                     detail("Low Power Mode is switched through a small helper that runs as administrator, can do nothing else, and only answers to Volt.")
                     detail("Per-app energy use is sampled from the same energy-impact figure Activity Monitor shows, then kept on disk so the 24-hour, 7-day and 30-day views have real history behind them.")
                 }

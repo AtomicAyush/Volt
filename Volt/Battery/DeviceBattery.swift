@@ -50,21 +50,23 @@ struct DeviceBattery: Identifiable, Equatable {
     let kind: Kind
     var cells: [Cell]
     let isCharging: Bool
-    /// False for a paired device that is not currently connected: the levels are the
-    /// last ones macOS saw, so they are shown dimmed and never trigger alerts.
+    /// True when the level is live: from macOS for a connected device, from IOBluetooth,
+    /// or from the device's own broadcast. False for a level Volt remembered, or one the
+    /// report still lists for a device that is off with nothing broadcasting; either is
+    /// shown dimmed and never triggers alerts.
     var isConnected: Bool
     /// Shown in place of a level when macOS exposes no battery for this device.
     var note: String?
     /// Apple model number from the Bluetooth report, used to match this device against
     /// the Continuity advertisements it broadcasts.
     var model: UInt16?
-    /// True when the level came from a Continuity advertisement, which reports in
-    /// steps of ten rather than exactly.
-    var isApproximate: Bool = false
     /// Connected over Bluetooth LE alone, with no audio or input profile — the kind of
     /// link System Settings does not list and that says nothing about the device being
     /// in use.
     var isBareLELink: Bool = false
+    /// The level came from Volt's own memory of an earlier reading, not from anything
+    /// the device is reporting now.
+    var isRemembered: Bool = false
 
     /// The cell most at risk — what alerts and the sort order key off.
     var lowestPercent: Int { cells.map(\.percent).min() ?? 100 }

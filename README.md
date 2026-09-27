@@ -139,27 +139,31 @@ Also not built: desktop widgets, and auto-dismissing macOS's own low-battery pop
 ## AirPods
 
 macOS stops publishing a battery level for some accessories once they are actually
-connected — AirPods Max report one while idle and nothing at all while in use — and they
-do not expose the standard Bluetooth battery service either, which a GATT connection
-confirms.
+connected, and on macOS 27 it publishes none at all for AirPods Max; they do not expose
+the standard Bluetooth battery service either, which a GATT connection confirms.
 
-What they do broadcast is Apple's undocumented "proximity pairing" advertisement, which
-carries the levels as nibbles counting tens. The layout in `ContinuityDecoder` was
-written against captured bytes and checked against levels macOS reports for the same
-device: a pair whose real levels were 91% / 91% / 78% decoded as 90% / 90% / 80%, which
-is the format's resolution.
+What they do broadcast are Apple's undocumented Continuity advertisements: "proximity
+pairing" from the pods, and an accessory-status message from AirPods Max and from the
+case. Proximity pairing carries each level twice — a tens digit in the clear, and an
+exact percentage encrypted with a key from pairing — and accessory status carries exact
+percentages. The layouts in `ContinuityDecoder` were checked against macOS's own decode
+of the same bytes, which audioaccessoryd logs: 415 of 415 captured payloads decode
+exactly as macOS decodes them.
 
-The hard part is attribution. The advertisement carries a model number but no stable
-identifier — the address is randomised and the rest of the payload encrypted — so a
-neighbour's AirPods of the same model look identical to yours. Readings are only
-accepted for models paired to this Mac, only from the closest broadcaster of that model,
-and only above a signal threshold. They also never replace a level macOS reports, since
-that one is exact and complete; a decoded level is rounded and can be missing a pod.
-Rounded values are shown with a `~`.
+The hard part is attribution. The address is randomised, so nothing in the broadcast
+names the device. What tells them apart is the encryption: this Mac's own AirPods arrive
+readable, carrying a signature (three bytes that are zero or the end of a paired
+device's address), while a neighbour's arrive scrambled — model number included, in the
+accessory-status message. A broadcast is used only when it decoded exactly, for a model
+paired to this Mac, above a signal threshold; in captures holding thousands of
+broadcasts from other people's AirPods, none got through. A broadcast never replaces a
+level macOS reports for a connected device, only fills in what that report leaves out;
+for a device that is off, or that macOS reports nothing for, the live broadcast stands
+in.
 
-Exact levels come first from IOBluetooth, which still holds them after macOS stops
-putting them in its report — the same figures the Sound menu shows, behind properties
-that are not in the public headers. The broadcast decode only fills what is still empty.
+IOBluetooth, which holds the levels while a device is connected — the same figures the
+Sound menu shows, behind properties that are not in the public headers — fills in a
+connected device the report is silent on.
 
 Anything still without a level is listed with the reason rather than hidden, and the
 last level seen is remembered so a device that stops reporting keeps its number. The

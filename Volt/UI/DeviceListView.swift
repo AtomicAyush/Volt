@@ -94,10 +94,11 @@ struct DeviceRow: View {
                     }
                     .frame(height: 5)
 
-                    Text(device.isApproximate ? "~\(cell.percent)%" : "\(cell.percent)%")
+                    Text("\(cell.percent)%")
                         .font(.system(size: 11, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(device.isConnected ? .primary : .secondary)
+                        .lineLimit(1)
                         .frame(width: 38, alignment: .trailing)
                 }
                 .padding(.leading, cell.label.isEmpty ? 26 : 26)

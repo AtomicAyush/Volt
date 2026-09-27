@@ -55,18 +55,29 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
     /// Last level seen per device, to spot the level rising.
     private var levelHistory: [UUID: (percent: Int, seen: Date)] = [:]
 
-    /// Strongest Continuity reading seen for each model, keyed by model number.
-    private var continuityByModel: [UInt16: ContinuityReading] = [:]
+    /// The latest level seen for each part of each paired model. AirPods broadcast from
+    /// each pod in turn, and each pod mostly reports itself, so a whole reading has to be
+    /// pieced together from several broadcasts.
+    private var continuityParts: [UInt16: [ContinuityPart: (part: ContinuityReading.Part, seen: Date)]] = [:]
+
+    private enum ContinuityPart { case left, right, casing, main }
+
+    /// AirPods cases advertise under a product ID of their own, while the Bluetooth report
+    /// lists the pair under the pods'. Seen on this Mac: an AirPods Pro 2 (USB-C) case.
+    private static let podsModelForCase: [UInt16: UInt16] = [0x2018: 0x2024]
 
     /// Model numbers of devices actually paired to this Mac, supplied by DeviceMonitor.
-    /// Without this the decoder would happily report a stranger's AirPods.
     var pairedModels: Set<UInt16> = []
+    /// The last three bytes of each paired device's address, supplied by DeviceMonitor:
+    /// part of the signature that marks a broadcast as this Mac's own AirPods'.
+    var pairedAddressTails: Set<UInt32> = []
 
     /// Readings for paired models only, as name-less values keyed by model.
     @Published private(set) var continuity: [UInt16: ContinuityReading] = [:]
 
-    /// How close a broadcaster has to be before its reading is trusted. Anything
-    /// fainter is more likely to be someone else's.
+    /// How close a broadcaster has to be before its reading is used. Attribution rests
+    /// on the broadcast decoding exactly; this keeps other people's devices at a
+    /// distance as well.
     private static let minimumRSSI = -70
 
     private var knownStoreURL: URL {
@@ -99,6 +110,9 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         peripherals.removeAll()
         levels.removeAll()
         batteries = []
+        // So the next start() builds a new manager, which scans again as soon as it is
+        // powered on, and a new timer; `start()` does nothing while one exists.
+        central = nil
     }
 
     func refresh() { poll() }
@@ -309,20 +323,63 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
     private func captureAdvertisement(_ peripheral: CBPeripheral,
                                       _ advertisement: [String: Any], rssi: NSNumber) {
         guard let data = advertisement[CBAdvertisementDataManufacturerDataKey] as? Data,
-              let reading = ContinuityDecoder.decode(manufacturerData: data,
-                                                     rssi: rssi.intValue) else { return }
+              let reading = ContinuityDecoder.decode(manufacturerData: data, rssi: rssi.intValue,
+                                                     pairedAddressTails: pairedAddressTails)
+        else { return }
 
-        guard pairedModels.contains(reading.model),
-              reading.rssi >= Self.minimumRSSI else { return }
+        // 127 is CoreBluetooth's "no signal reading", not a strong signal.
+        guard reading.rssi < 0, reading.rssi >= Self.minimumRSSI else { return }
 
-        // Keep the closest broadcaster of each model.
-        if let existing = continuityByModel[reading.model],
-           existing.rssi > reading.rssi,
-           Date().timeIntervalSince(existing.seen) < 60 {
+        // Only this Mac's own devices arrive readable, with their signature; other people's
+        // AirPods of the same model give tens digits at most. A broadcast with nothing
+        // exact in it is theirs.
+        let parts: [ContinuityPart: ContinuityReading.Part?] = [
+            .left: reading.left, .right: reading.right, .casing: reading.casing, .main: reading.main,
+        ]
+        guard parts.values.contains(where: { $0?.isExact == true }) else { return }
+
+        // A case's broadcast carries the case and the pods inside it: file it under the
+        // pods. Its `main` is the case again, and is dropped.
+        var model = reading.model
+        var incoming = parts
+        if let pods = Self.podsModelForCase[model], pairedModels.contains(pods) {
+            model = pods
+            incoming.removeValue(forKey: .main)
+        }
+        guard pairedModels.contains(model) else { return }
+        let now = reading.seen
+
+        var known = continuityParts[model] ?? [:]
+        for (key, value) in incoming {
+            guard let part = value, part.isExact else { continue }
+            known[key] = (part, now)
+        }
+        continuityParts[model] = known
+
+        // While the device keeps broadcasting, a part not heard from for two minutes — a
+        // pod put away — is left out rather than shown stale. Once the whole device goes
+        // quiet nothing here runs again, and DeviceMonitor stops using the reading five
+        // minutes after it was last published.
+        func fresh(_ key: ContinuityPart) -> ContinuityReading.Part? {
+            guard let entry = known[key], now.timeIntervalSince(entry.seen) < 120 else { return nil }
+            return entry.part
+        }
+        let merged = ContinuityReading(model: model,
+                                       left: fresh(.left), right: fresh(.right),
+                                       casing: fresh(.casing), main: fresh(.main),
+                                       rssi: reading.rssi, seen: now)
+        guard [merged.left, merged.right, merged.casing, merged.main].contains(where: { $0 != nil })
+        else { return }
+
+        // Every publish re-merges the device list, and AirPods broadcast several times a
+        // second. Pass on a change straight away, and otherwise just often enough to
+        // keep the reading from being judged stale.
+        if let current = continuity[model], now.timeIntervalSince(current.seen) < 30,
+           current.left == merged.left, current.right == merged.right,
+           current.casing == merged.casing, current.main == merged.main {
             return
         }
-        continuityByModel[reading.model] = reading
-        continuity = continuityByModel
+        continuity[model] = merged
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
