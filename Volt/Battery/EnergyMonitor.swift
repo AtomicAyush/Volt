@@ -152,8 +152,11 @@ final class EnergyMonitor: ObservableObject {
     /// stored history keys stay stable.
     private func resolve(_ rows: [Row]) -> [EnergyEntry] {
         var merged: [String: EnergyEntry] = [:]
+        let running = NSWorkspace.shared.runningApplications
         for row in rows {
-            let app = NSRunningApplication(processIdentifier: pid_t(row.pid))
+            let process = NSRunningApplication(processIdentifier: pid_t(row.pid))
+            // A web view's work belongs to the app showing it.
+            let app = process.flatMap { Self.host(ofWebKitProcess: $0, among: running) } ?? process
             let name = app?.localizedName ?? Self.normalize(row.command)
             guard !name.isEmpty else { continue }
 
@@ -165,11 +168,31 @@ final class EnergyMonitor: ObservableObject {
                                            cpu: existing.cpu + row.cpu,
                                            icon: existing.icon)
             } else {
-                merged[name] = EnergyEntry(name: name, pid: row.pid, impact: row.power,
-                                           cpu: row.cpu, icon: icon(for: name, pid: row.pid))
+                let pid = app.map { Int($0.processIdentifier) } ?? row.pid
+                merged[name] = EnergyEntry(name: name, pid: pid, impact: row.power,
+                                           cpu: row.cpu, icon: icon(for: name, pid: pid))
             }
         }
         return merged.values.sorted { $0.impact > $1.impact }
+    }
+
+    /// Safari's pages run in WebKit processes of their own — "Safari Web Content",
+    /// "Safari Graphics and Media", "Safari Networking" — and so do the web views of
+    /// other apps. Their energy is the app's, so they are folded into it. The helper's
+    /// name is the app's name plus a translated description, so the app is found by
+    /// name, which works in any language. Returns nil for anything else, including a
+    /// Safari extension's process ("AdBlock Web Extension"), which keeps its own row.
+    private static func host(ofWebKitProcess process: NSRunningApplication,
+                             among running: [NSRunningApplication]) -> NSRunningApplication? {
+        guard process.bundleIdentifier?.hasPrefix("com.apple.WebKit.") == true,
+              let helperName = process.localizedName else { return nil }
+        return running
+            .filter { app in
+                guard app.bundleIdentifier?.hasPrefix("com.apple.WebKit.") != true,
+                      let name = app.localizedName, !name.isEmpty else { return false }
+                return helperName.hasPrefix(name) || helperName.hasSuffix(name)
+            }
+            .max { ($0.localizedName?.count ?? 0) < ($1.localizedName?.count ?? 0) }
     }
 
     /// Two samples are required: `top`'s first pass reports lifetime averages, the
@@ -207,7 +230,7 @@ final class EnergyMonitor: ObservableObject {
         var name = raw
         if let paren = name.firstIndex(of: "(") { name = String(name[name.startIndex..<paren]) }
         name = name.trimmingCharacters(in: .whitespaces)
-        for suffix in [" Helper", " He", " Web Content", " Networking", " GPU", " Renderer"] {
+        for suffix in [" Helper", " He", " Web Content", " Graphics and Media", " Networking", " GPU", " Renderer"] {
             if name.hasSuffix(suffix) { name = String(name.dropLast(suffix.count)) }
         }
         return name.trimmingCharacters(in: .whitespaces)
@@ -256,7 +279,29 @@ final class EnergyMonitor: ObservableObject {
         guard let data = try? Data(contentsOf: storeURL),
               let decoded = try? JSONDecoder().decode([EnergySample].self, from: data) else { return }
         let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
-        history = decoded.filter { $0.date >= cutoff }
+        history = decoded.filter { $0.date >= cutoff }.map(Self.foldingWebKitHelpers)
+    }
+
+    /// History recorded before WebKit helpers were folded into their app has them as
+    /// rows of their own; fold those the same way, so the app's past and present
+    /// figures compare like for like.
+    private static func foldingWebKitHelpers(_ sample: EnergySample) -> EnergySample {
+        var byApp: [String: Double] = [:]
+        for (name, impact) in sample.byApp {
+            // "Safari Web Content (Cached)" is a Safari helper too.
+            var base = name
+            if name.hasSuffix(")"), let open = name.range(of: " (", options: .backwards) {
+                base = String(name[..<open.lowerBound])
+            }
+            var owner = name
+            for suffix in [" Web Content", " Graphics and Media", " Networking"] where base.hasSuffix(suffix) {
+                owner = String(base.dropLast(suffix.count))
+                break
+            }
+            if owner.isEmpty { owner = name }
+            byApp[owner, default: 0] += impact
+        }
+        return EnergySample(date: sample.date, byApp: byApp)
     }
 
     private func saveHistory() {
