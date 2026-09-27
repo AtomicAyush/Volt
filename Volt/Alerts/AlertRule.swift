@@ -70,9 +70,11 @@ struct LevelAlert: Codable, Identifiable, Equatable {
     var color: AlertColor = .amber
 
     static let defaults: [LevelAlert] = [
-        LevelAlert(level: 20, sound: .ping, color: .amber),
-        LevelAlert(level: 10, sound: .submarine, repeatMinutes: 10, color: .orange),
-        LevelAlert(level: 5, sound: .sosumi, repeatMinutes: 5, color: .red)
+        // A quarter charge or less is red, so these all are; otherwise the battery would
+        // turn a milder colour as it fell past 20%.
+        LevelAlert(level: 20, sound: .ping, color: defaultColor(for: 20)),
+        LevelAlert(level: 10, sound: .submarine, repeatMinutes: 10, color: defaultColor(for: 10)),
+        LevelAlert(level: 5, sound: .sosumi, repeatMinutes: 5, color: defaultColor(for: 5))
     ]
 
     // Decoded by hand so preferences saved before colours existed still load.

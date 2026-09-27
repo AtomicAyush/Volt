@@ -39,14 +39,16 @@ enum MenuBarIcon {
         return luminance > 0.55 ? .black : .white
     }
 
+    /// The other styles stay in the menu bar's own colour while all is well. Anything
+    /// worth noticing — charging, Low Power Mode, an alert level the user set, or a
+    /// low charge — takes the same colour the panel shows for it.
     static func fillColor(for percent: Int, charging: Bool, colored: Bool) -> NSColor {
         guard colored else { return .labelColor }
-        if charging { return NSColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1) }
-        switch percent {
-        case ...25: return NSColor(red: 1.00, green: 0.27, blue: 0.23, alpha: 1)
-        case ..<35: return NSColor(red: 1.00, green: 0.72, blue: 0.11, alpha: 1)
-        default: return .labelColor
+        if let state = BatteryTint.stateColor(percentage: percent, charging: charging) {
+            return state.nsColor
         }
+        let scale = BatteryTint.defaultScale(percent)
+        return scale == .red || scale == .amber ? scale.nsColor : .labelColor
     }
 
     // MARK: - Styles

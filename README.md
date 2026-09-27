@@ -86,9 +86,9 @@ with **Test Alert**. Turn on **Open Volt at login** in Settings › General.
 Four styles — battery, battery with percentage inside, percentage only, and ring.
 
 In the numbered style the shell is filled solid and the colour alone carries the level,
-stepping green → lime → amber → orange → red as the charge falls. The digits are drawn
-black or white by the fill's luminance, so they stay readable at every level and against
-any wallpaper.
+stepping green → lime → amber → red as the charge falls (below a level you set an alert
+for, that alert's colour takes over). The digits are drawn black or white by the fill's
+luminance, so they stay readable at every level and against any wallpaper.
 
 ![Menu bar icons](docs/menubar.png)
 

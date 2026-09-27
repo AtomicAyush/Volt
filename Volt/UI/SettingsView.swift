@@ -174,13 +174,15 @@ struct AlertSettings: View {
                 }
 
                 HStack {
-                    Slider(value: $newLevel, in: 1...99, step: 1) {
+                    // Whole numbers without `step:`, which would draw 99 tick marks.
+                    Slider(value: Binding(get: { newLevel }, set: { newLevel = $0.rounded() }),
+                           in: 1...99) {
                         Text("\(Int(newLevel))%").monospacedDigit().frame(width: 42)
                     }
                     Button("Add alert") {
                         let level = Int(newLevel)
                         guard !prefs.levelAlerts.contains(where: { $0.level == level }) else { return }
-                        prefs.levelAlerts.append(LevelAlert(level: level))
+                        prefs.levelAlerts.append(LevelAlert(level: level, color: LevelAlert.defaultColor(for: level)))
                         prefs.levelAlerts.sort { $0.level > $1.level }
                     }
                 }
