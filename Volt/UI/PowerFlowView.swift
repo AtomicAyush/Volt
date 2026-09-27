@@ -51,13 +51,13 @@ struct FlowBand: Shape {
 /// Where the watts are going, drawn as ribbons whose thickness is their share.
 ///
 /// Plugged in, the adapter's output splits between charging the pack and running the
-/// Mac. On battery it is the pack doing the running, so there is a single ribbon going
-/// the other way. Everything animates: the readings move continuously, and a diagram
-/// that snapped between them would be harder to read than one that flows.
+/// Mac. On battery it is the pack doing the running. Either way, anything charging from
+/// the Mac's own ports gets a ribbon of its own. Everything animates: the readings move
+/// continuously, and a diagram that snapped between them would be harder to read than
+/// one that flows.
 struct PowerFlowView: View {
     let snapshot: BatterySnapshot
 
-    private let flowHeight: CGFloat = 96
     private let boxGap: CGFloat = 6
 
     private var tint: Color {
@@ -66,20 +66,81 @@ struct PowerFlowView: View {
 
     private var toBattery: Double { snapshot.chargePower }
     private var toSystem: Double { snapshot.load }
-    private var total: Double { max(0.1, toBattery + toSystem) }
 
-    /// Share of the left edge the battery ribbon takes, kept off the extremes so the
-    /// thinner ribbon never collapses to nothing.
-    private var split: CGFloat {
-        guard snapshot.isCharging else { return 1 }
-        return max(0.17, min(0.83, CGFloat(toBattery / total)))
+    /// One ribbon's destination.
+    private struct Destination: Identifiable {
+        enum Kind { case battery, mac, port }
+        let id: String
+        let kind: Kind
+        let watts: Double
+        let symbol: String
+        let name: String
+    }
+
+    private var destinations: [Destination] {
+        var list: [Destination] = []
+        if snapshot.isCharging {
+            list.append(.init(id: "battery", kind: .battery, watts: toBattery,
+                              symbol: "battery.100percent.bolt", name: "Battery"))
+        }
+        list.append(.init(id: "mac", kind: .mac, watts: snapshot.macLoad,
+                          symbol: "laptopcomputer", name: "This Mac"))
+        for output in snapshot.portOutputs {
+            list.append(.init(id: "port\(output.port)", kind: .port, watts: output.watts,
+                              symbol: output.symbol, name: output.name))
+        }
+        return list
+    }
+
+    /// Each ribbon's span on the left edge, as fractions of the height: a small sliver
+    /// each, so a 3 W accessory next to 56 W of charging still shows, and the rest in
+    /// proportion to watts, so thickness always follows the figures. A hairline separates
+    /// them, since several can share a colour.
+    private func sourceSpans(_ list: [Destination], height: CGFloat) -> [ClosedRange<CGFloat>] {
+        guard list.count > 1 else { return [0...1] }
+        let n = CGFloat(list.count)
+        let total = max(0.1, list.reduce(0) { $0 + max(0, $1.watts) })
+        let base = min(0.08, 0.5 / n)
+        let hairline = 1 / height
+        let usable = 1 - hairline * (n - 1)
+        var top: CGFloat = 0
+        return list.map { destination in
+            let share = base + (1 - base * n) * CGFloat(max(0, destination.watts) / total)
+            let span = top...(top + usable * share)
+            top = span.upperBound + hairline
+            return span
+        }
     }
 
     /// The destination boxes are the same size, so the ribbons converge to fixed ends
     /// and the proportion is carried by their thickness at the source.
-    private var midpoint: CGFloat { 0.5 }
+    private func destinationSpans(count: Int, height: CGFloat) -> [ClosedRange<CGFloat>] {
+        let gap = boxGap / height
+        let box = (1 - gap * CGFloat(count - 1)) / CGFloat(count)
+        return (0..<count).map { i in
+            let top = CGFloat(i) * (box + gap)
+            return top...(top + box)
+        }
+    }
+
+    /// Boxes, labels and caption rows are laid out at the final size, so one that is added
+    /// waits for the diagram to grow before appearing, and one that goes fades out quickly
+    /// as the diagram starts to shrink.
+    private static let placedAtFinalSize = AnyTransition.asymmetric(
+        insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.45)),
+        removal: .opacity.animation(.easeIn(duration: 0.12)))
+
+    /// Taller when there are more than two ribbons, so their labels do not crowd.
+    private func flowHeight(for count: Int) -> CGFloat {
+        96 + CGFloat(max(0, count - 2)) * 30
+    }
 
     var body: some View {
+        let list = destinations
+        let height = flowHeight(for: list.count)
+        let left = sourceSpans(list, height: height)
+        let right = destinationSpans(count: list.count, height: height)
+
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "bolt.horizontal.circle")
@@ -93,27 +154,27 @@ struct PowerFlowView: View {
             HStack(spacing: 7) {
                 source.frame(width: 58)
 
-                flow
+                flow(list, left: left, right: right)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     // Above the clip: the rolling digits travel a little past their own
                     // bounds as they change, and inside the clip that got cut off.
-                    .overlay { labels }
+                    .overlay { labels(list, left: left, right: right) }
 
                 VStack(spacing: boxGap) {
-                    if snapshot.isCharging {
-                        endpoint(symbol: "battery.100percent.bolt", tint: tint)
+                    ForEach(list) { destination in
+                        endpoint(destination)
+                            .transition(Self.placedAtFinalSize)
                     }
-                    endpoint(symbol: "laptopcomputer", tint: Panel.secondary)
                 }
                 .frame(width: 48)
             }
-            .frame(height: flowHeight)
+            .frame(height: height)
 
             caption
         }
-        .animation(.easeInOut(duration: 0.55), value: split)
-        .animation(.easeInOut(duration: 0.55), value: snapshot.isCharging)
+        .animation(.easeInOut(duration: 0.55), value: left.map(\.upperBound))
+        .animation(.easeInOut(duration: 0.55), value: list.map(\.id))
     }
 
     // MARK: - Pieces
@@ -161,68 +222,79 @@ struct PowerFlowView: View {
         return "max \(negotiated)W"
     }
 
-    private func endpoint(symbol: String, tint: Color) -> some View {
-        Image(systemName: symbol)
+    private func endpoint(_ destination: Destination) -> some View {
+        let color = color(for: destination)
+        return Image(systemName: destination.symbol)
             .font(.system(size: 15))
-            .foregroundStyle(tint)
+            .foregroundStyle(color)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(tint.opacity(0.10)))
+                .fill(color.opacity(0.10)))
+            .help(destination.name)
+            .accessibilityLabel("\(destination.name), \(String(format: "%.1f", destination.watts)) watts")
     }
 
-    private var flow: some View {
-        GeometryReader { geo in
-            let h = geo.size.height
-            let gapFraction = boxGap / h
+    private func color(for destination: Destination) -> Color {
+        switch destination.kind {
+        case .battery: return tint
+        case .mac: return Panel.secondary
+        case .port: return Panel.blue
+        }
+    }
 
-            ZStack {
-                if snapshot.isCharging {
-                    FlowBand(leftTop: 0, leftBottom: split,
-                             rightTop: 0, rightBottom: midpoint - gapFraction / 2)
-                        .fill(LinearGradient(colors: [tint.opacity(0.32), tint.opacity(0.78)],
-                                             startPoint: .leading, endPoint: .trailing))
-                        .overlay {
+    private func fill(for destination: Destination, alone: Bool) -> LinearGradient {
+        let colors: [Color]
+        switch destination.kind {
+        case .battery: colors = [tint.opacity(0.32), tint.opacity(0.78)]
+        // Alone, the Mac's ribbon carries the battery's colour, as it always has.
+        case .mac: colors = alone ? [tint.opacity(0.30), tint.opacity(0.65)]
+                                  : [Color.white.opacity(0.10), Color.white.opacity(0.24)]
+        case .port: colors = [Panel.blue.opacity(0.28), Panel.blue.opacity(0.70)]
+        }
+        return LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+    }
+
+    private func flow(_ list: [Destination], left: [ClosedRange<CGFloat>],
+                      right: [ClosedRange<CGFloat>]) -> some View {
+        ZStack {
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, destination in
+                let band = FlowBand(leftTop: left[index].lowerBound,
+                                    leftBottom: left[index].upperBound,
+                                    rightTop: right[index].lowerBound,
+                                    rightBottom: right[index].upperBound)
+                band.fill(fill(for: destination, alone: list.count == 1))
+                    .overlay {
+                        if destination.kind == .battery {
                             // A streak of light down the ribbon, for a bit of depth.
-                            FlowBand(leftTop: 0, leftBottom: split,
-                                     rightTop: 0, rightBottom: midpoint - gapFraction / 2)
-                                .fill(LinearGradient(colors: [.clear, .white.opacity(0.20), .clear],
+                            band.fill(LinearGradient(colors: [.clear, .white.opacity(0.20), .clear],
                                                      startPoint: .top, endPoint: .bottom))
                         }
-
-                    FlowBand(leftTop: split, leftBottom: 1,
-                             rightTop: midpoint + gapFraction / 2, rightBottom: 1)
-                        .fill(LinearGradient(colors: [Color.white.opacity(0.10),
-                                                      Color.white.opacity(0.24)],
-                                             startPoint: .leading, endPoint: .trailing))
-
-                } else {
-                    FlowBand(leftTop: 0, leftBottom: 1, rightTop: 0, rightBottom: 1)
-                        .fill(LinearGradient(colors: [tint.opacity(0.30), tint.opacity(0.65)],
-                                             startPoint: .leading, endPoint: .trailing))
-                }
+                    }
+                    .transition(.opacity)
             }
         }
     }
 
     /// The wattage labels, centred on each ribbon where it crosses the middle of the
-    /// diagram rather than at its left edge, where the thinner ribbon is thinnest.
-    private var labels: some View {
+    /// diagram rather than at its left edge, where a thin ribbon is thinnest. With the
+    /// control points level with their endpoints, a ribbon's centre line crosses the
+    /// middle exactly halfway between where it starts and where it ends. With three or
+    /// more ribbons they sit beside the boxes instead.
+    private func labels(_ list: [Destination], left: [ClosedRange<CGFloat>],
+                        right: [ClosedRange<CGFloat>]) -> some View {
         GeometryReader { geo in
             let h = geo.size.height
-            let centreX = geo.size.width / 2
-            // With the control points level with their endpoints, the divider crosses
-            // the middle exactly halfway between where it starts and where it ends.
-            let gap = boxGap / h
-            let divider = h * (split + (midpoint - gap / 2)) / 2
             let margin: CGFloat = 12
-
-            if snapshot.isCharging {
-                watts(toBattery, at: CGPoint(x: centreX,
-                                             y: min(max(divider / 2, margin), h - margin)))
-                watts(toSystem, at: CGPoint(x: centreX,
-                                            y: min(max((divider + h) / 2, margin), h - margin)))
-            } else {
-                watts(toSystem, at: CGPoint(x: centreX, y: h / 2))
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, destination in
+                let start = (left[index].lowerBound + left[index].upperBound) / 2
+                let end = (right[index].lowerBound + right[index].upperBound) / 2
+                // With three or more ribbons the thin ones cross each other mid-way, so
+                // the labels go beside the boxes, where every ribbon is flat and a box high.
+                let crowded = list.count > 2
+                watts(destination.watts,
+                      at: CGPoint(x: crowded ? geo.size.width - 30 : geo.size.width / 2,
+                                  y: min(max(h * (crowded ? end : (start + end) / 2), margin), h - margin)))
+                    .transition(Self.placedAtFinalSize)
             }
         }
     }
@@ -246,17 +318,47 @@ struct PowerFlowView: View {
                       : (snapshot.isPluggedIn ? "powerplug.fill" : "battery.50percent"))
                     .font(.system(size: 10))
                     .foregroundStyle(snapshot.isCharging ? tint : Panel.secondary)
+                    .frame(width: 14)
                 Text(headline)
                     .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .foregroundStyle(Panel.label)
             }
+            // A different kind of headline is a new row, which enters once the card has
+            // resized; a changing number just rolls.
+            .id(headlineKind)
+            .transition(Self.placedAtFinalSize)
             Text(loadDescription)
                 .font(.system(size: 10.5))
                 .foregroundStyle(Panel.secondary)
+            ForEach(snapshot.portOutputs) { output in
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: output.symbol)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Panel.blue)
+                        .frame(width: 14)
+                    // Wraps rather than cutting the name short: the panel is narrow, and a
+                    // device name can be long.
+                    Text("\(output.name) · \(String(format: "%.1f", output.watts)) W from this Mac")
+                        .font(.system(size: 10.5))
+                        .monospacedDigit()
+                        .foregroundStyle(Panel.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+                .transition(Self.placedAtFinalSize)
+            }
         }
-        .frame(maxWidth: .infinity)
+        // Left-aligned with the header: centred, the whole block shifted sideways
+        // whenever its longest line changed.
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headlineKind: Int {
+        if snapshot.isCharging { return 0 }
+        if snapshot.isPluggedIn { return snapshot.watts < -0.5 ? 1 : 2 }
+        return 3
     }
 
     private var headline: String {
@@ -273,7 +375,7 @@ struct PowerFlowView: View {
     }
 
     private var loadDescription: String {
-        switch toSystem {
+        switch snapshot.macLoad {
         case ..<6: return "Idle: little more than the display"
         case ..<14: return "Light use: typical for web and docs"
         case ..<28: return "Normal workload: comfortably within range"

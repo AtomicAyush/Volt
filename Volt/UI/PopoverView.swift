@@ -100,6 +100,12 @@ struct PopoverView: View {
                 ActionsCard(openSettings: openSettings, quit: quit)
             }
             .padding(12)
+            // A device plugged into the Mac adds a ribbon to the power flow and makes its
+            // card taller; the cards below move with it rather than jumping.
+            // Moves, but does not cross-fade, the text inside the cards.
+            .contentTransition(.identity)
+            .animation(.easeInOut(duration: 0.55), value: battery.snapshot.portOutputs.map(\.id))
+            .animation(.easeInOut(duration: 0.55), value: battery.snapshot.isCharging)
             .background(
                 GeometryReader { geometry in
                     Color.clear.preference(key: ContentHeightKey.self, value: geometry.size.height)

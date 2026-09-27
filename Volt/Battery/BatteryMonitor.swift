@@ -175,6 +175,7 @@ final class BatteryMonitor: ObservableObject {
         }
 
         applySMC(to: &s)
+        applyPortOutputs(to: &s)
         return s
     }
 
@@ -194,6 +195,59 @@ final class BatteryMonitor: ObservableObject {
         // behind, and on battery it bears no relation to what is leaving the pack.
         if let adapterIn = smc.float("PDTR"), adapterIn > 0 { s.adapterPower = adapterIn }
         if let batteryPower = smc.float("PPBR") { s.batteryPower = batteryPower }
+    }
+
+    /// What each port is supplying, and to what. The watts are read every second, and so is
+    /// the device on the port; its name is worked out again every half minute, or every
+    /// five seconds until its own name turns up — the Bluetooth scan that name comes from
+    /// takes a few seconds after launch.
+    private var portNames: [Int: (identity: PortPower.Identity?, name: String, symbol: String,
+                                  isOwnName: Bool, looked: Date)] = [:]
+
+    private func applyPortOutputs(to s: inout BatterySnapshot) {
+        let outputs = PortPower.outputs()
+        let active = Set(outputs.map(\.port))
+        portNames = portNames.filter { active.contains($0.key) }
+
+        s.portOutputs = outputs.map { port, watts in
+            // Identified every time — a fraction of a millisecond — so a device swapped on
+            // the same port is noticed at once; only the naming is cached.
+            let identity = PortPower.identify(port: port)
+            if let known = portNames[port], known.identity == identity,
+               Date().timeIntervalSince(known.looked) < (known.isOwnName ? 30 : 5) {
+                return PortOutput(port: port, watts: watts, name: known.name, symbol: known.symbol,
+                                  serial: identity?.serial)
+            }
+            let (name, symbol, isOwnName) = Self.describe(identity)
+            portNames[port] = (identity, name, symbol, isOwnName, Date())
+            return PortOutput(port: port, watts: watts, name: name, symbol: symbol, serial: identity?.serial)
+        }
+    }
+
+    /// The paired device's own name ("Ayush's AirPods Max") when its serial number is
+    /// known over Bluetooth or the cable, else the name the USB device gives. The flag
+    /// says which it is.
+    private static func describe(_ identity: PortPower.Identity?) -> (String, String, Bool) {
+        if let serial = identity?.serial, !serial.isEmpty {
+            if let paired = DeviceMonitor.shared.device(serial: serial) {
+                return (paired.name, paired.kind.symbol, true)
+            }
+            let flat = serial.replacingOccurrences(of: "-", with: "").uppercased()
+            if let phone = IOSDeviceMonitor.shared.devices.first(where: {
+                $0.udid.replacingOccurrences(of: "-", with: "").uppercased() == flat
+            }) {
+                return (phone.name, phone.kind.symbol, true)
+            }
+        }
+        if var name = identity?.usbName, !name.isEmpty {
+            // "AirPods Max USB Audio" is the headphones.
+            for suffix in [" USB Audio", " USB"] where name.hasSuffix(suffix) {
+                name = String(name.dropLast(suffix.count))
+            }
+            let kind = DeviceBattery.Kind.from(minorType: nil, name: name)
+            return (name, kind == .other ? "cable.connector" : kind.symbol, false)
+        }
+        return ("USB-C accessory", "cable.connector", false)
     }
 
     /// The gauge reports a "still working it out" value in several ways: 65535, -1,

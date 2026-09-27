@@ -108,6 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lines.append(String(format: "  continuity 0x%04x: L=%@ R=%@ case=%@ main=%@ rssi=%d",
                                     model, part(r.left), part(r.right), part(r.casing), part(r.main), r.rssi))
             }
+            for output in BatteryMonitor.shared.snapshot.portOutputs {
+                lines.append(String(format: "  port %d → %@ %.2f W", output.port, output.name, output.watts))
+            }
             for d in DeviceMonitor.shared.devices {
                 lines.append("  \(d.name) [\(d.kind.rawValue)] cells=\(d.cells.map(\.percent))\(d.isCharging ? " CHARGING" : "") note=\(d.note ?? "-")")
             }

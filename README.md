@@ -35,9 +35,11 @@ updates — so a readout taken from it visibly lags and repeats. The controller 
 about once a second, which is what makes the numbers look live.
 
 **Power flow.** Plugged in, the adapter's output splits between charging the pack and
-running the Mac — shown as two ribbons whose thickness is their share, with what the
-adapter is actually delivering on one side and where the watts land on the other. On
-battery it is a single ribbon flowing the other way.
+running the Mac — shown as ribbons whose thickness is their share, with what the adapter
+is actually delivering on one side and where the watts land on the other. On battery the
+pack does the running. Anything charging from the Mac's own USB-C ports — AirPods, a
+phone — gets a ribbon of its own, named after the device when it is paired or known
+over the cable, and shows as charging in the device list.
 
 The ribbons animate. Readings move continuously and a diagram that snapped between them
 would be harder to read than one that flows, so the band geometry is interpolated
@@ -161,6 +163,12 @@ level macOS reports for a connected device, only fills in what that report leave
 for a device that is off, or that macOS reports nothing for, the live broadcast stands
 in.
 
+AirPods Max never say they are charging: their broadcast reads "not charging" even on
+a charger, and macOS's own decode of it agrees. So they are shown charging while they
+draw power from one of the Mac's ports, or while their level is rising — a rise counts
+only against a recent reading, a step back up after a step down does not count, and it
+lapses ten minutes after the last rise.
+
 IOBluetooth, which holds the levels while a device is connected — the same figures the
 Sound menu shows, behind properties that are not in the public headers — fills in a
 connected device the report is silent on.
@@ -203,6 +211,7 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 | --- | --- |
 | Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry — on macOS 27 also its `BatteryData` and that of the `AppleSmartBatteryPack` child — with `AppleSMC` `TB0T` as a temperature fallback |
 | Current, voltage, adapter input | `AppleSMC` keys `B0AC`, `B0AV`, `PDTR`, `PPBR` |
+| Power out of each USB-C port | `AppleSMC` keys `D<n>JV`, `D<n>JI` and power role `D<n>PR`; the device from the port's own USB record (`IOPortTransportStateUSB3`/`USB2`), named after the paired Bluetooth device or cabled iPhone with the same serial |
 | Adapter and system power fallback | `BatteryData.AdapterPower` / `SystemPower`; on macOS 27, `PowerTelemetryData.SystemLoad` |
 | Change notifications | `IOPSNotificationCreateRunLoopSource`, plus a `kIOGeneralInterest` notification on the battery itself |
 | Condition, Apple's Maximum Capacity | `system_profiler SPPowerDataType`, every 15 min |

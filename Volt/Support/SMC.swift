@@ -145,6 +145,11 @@ final class SMC {
         return Int(Int16(bitPattern: UInt16(bytes[1]) << 8 | UInt16(bytes[0])))
     }
 
+    func uint8(_ key: String) -> Int? {
+        guard let (_, bytes) = raw(key), let byte = bytes.first else { return nil }
+        return Int(byte)
+    }
+
     func uint16(_ key: String) -> Int? {
         guard let (_, bytes) = raw(key), bytes.count >= 2 else { return nil }
         return Int(UInt16(bytes[1]) << 8 | UInt16(bytes[0]))

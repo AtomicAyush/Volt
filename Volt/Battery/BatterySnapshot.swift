@@ -27,11 +27,14 @@ struct BatterySnapshot: Equatable {
     var adapterName: String?
     /// Power actually arriving from the adapter, as opposed to its rating.
     var adapterPower: Double?
-    /// What the Mac itself is drawing, separate from what goes into the battery.
+    /// Everything drawn from the supply apart from what goes into the battery: the Mac
+    /// itself plus any devices charging from its ports (the gauge's system load).
     var systemPower: Double?
     /// Power in or out of the pack, straight from the controller. Only meaningful on
     /// battery: it measures discharge and reads under a watt while charging at sixty.
     var batteryPower: Double?
+    /// Devices charging from this Mac's own ports, such as AirPods plugged into it.
+    var portOutputs: [PortOutput] = []
 
     /// "Normal", "Service Recommended", ... as reported by macOS.
     var condition: String?
@@ -55,11 +58,11 @@ struct BatterySnapshot: Equatable {
     /// Power going into the battery right now; zero when it is not charging.
     var chargePower: Double { max(0, watts) }
 
-    /// What the machine itself is drawing.
+    /// Everything drawn from the supply: the Mac itself plus anything charging from its
+    /// ports (`macLoad` is the Mac alone).
     ///
-    /// On battery that is simply the discharge: everything leaving the pack is running
-    /// the Mac. Plugged in it is whatever the adapter delivers beyond what the battery
-    /// is taking — plus whatever the battery is adding, when the Mac is drawing more
+    /// On battery that is simply the discharge. Plugged in it is whatever the adapter
+    /// delivers beyond what the battery is taking — plus whatever the battery is adding, when the Mac is drawing more
     /// than the adapter supplies.
     ///
     /// This is exactly how the gauge works out its own system load on macOS 27: power
@@ -74,6 +77,13 @@ struct BatterySnapshot: Equatable {
         if let systemPower, systemPower > 0 { return systemPower }
         return abs(min(0, watts))
     }
+
+    /// What the ports are supplying to devices charging from them. Part of `load`: it
+    /// comes out of the same supply as everything else the Mac runs.
+    var portPower: Double { portOutputs.reduce(0) { $0 + $1.watts } }
+
+    /// What the Mac itself is drawing, without the devices charging from it.
+    var macLoad: Double { max(0, load - portPower) }
 
     var isDischarging: Bool { isPresent && !isPluggedIn }
 

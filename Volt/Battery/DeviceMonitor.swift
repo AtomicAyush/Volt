@@ -32,6 +32,14 @@ final class DeviceMonitor: ObservableObject {
     private var lastSaved = Date.distantPast
     /// Normalised address to the name key of the device the scan listed under it.
     private var scanOwners: [String: String] = [:]
+    /// Paired devices by serial number, from the last scan.
+    private var bySerial: [String: DeviceBattery] = [:]
+    /// Serial numbers of devices drawing power from one of this Mac's ports right now.
+    private var chargingFromMac: Set<String> = []
+    /// Each broadcasting device's last level, and when it last rose. AirPods Max say "not
+    /// charging" in their broadcast even on a charger — macOS's own decode agrees — so a
+    /// rising level is the evidence.
+    private var levelTrend: [String: (percent: Int, seen: Date, lastRise: Date?, justFell: Bool)] = [:]
     /// The most recent Bluetooth/HID scan, kept so a cable event can be merged in
     /// without waiting for the next (slow) system_profiler run.
     private var lastScan: [DeviceBattery] = []
@@ -189,6 +197,26 @@ final class DeviceMonitor: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.remerge() }
             .store(in: &cancellables)
+
+        // Something plugged into the Mac and drawing power is charging from it.
+        BatteryMonitor.shared.$snapshot
+            .map { Set($0.portOutputs.compactMap(\.serial)) }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] serials in
+                guard let self else { return }
+                // Unplugged from the Mac: the level rose while it was on the port, and that
+                // rise must not keep it showing as charging. A new rise, on another charger,
+                // marks it again.
+                for serial in self.chargingFromMac.subtracting(serials) {
+                    if let device = self.bySerial[serial] {
+                        self.levelTrend[Self.nameKey(device.name)]?.lastRise = nil
+                    }
+                }
+                self.chargingFromMac = serials
+                self.remerge()
+            }
+            .store(in: &cancellables)
     }
 
     func stop() { timer?.invalidate(); timer = nil }
@@ -207,6 +235,8 @@ final class DeviceMonitor: ObservableObject {
                 // loses to the first in deduplication.
                 self.scanOwners = Dictionary(found.map { (BluetoothFrameworkBattery.normalise($0.id), Self.nameKey($0.name)) },
                                              uniquingKeysWith: { first, _ in first })
+                self.bySerial = Dictionary(found.compactMap { d in d.serialNumber.map { ($0, d) } },
+                                           uniquingKeysWith: { first, _ in first })
                 // One entry per device before anything is remembered: with AirPods listed
                 // twice, the stored reading would otherwise flip between the two.
                 self.lastScan = self.deduplicate(found).compactMap { self.applyCache(to: $0) }
@@ -214,6 +244,9 @@ final class DeviceMonitor: ObservableObject {
             }
         }
     }
+
+    /// The paired device with this serial number, if the last scan listed one.
+    func device(serial: String) -> DeviceBattery? { bySerial[serial] }
 
     /// Hides a device from the list for good, until it is shown again from Settings.
     func hide(_ device: DeviceBattery) {
@@ -244,6 +277,7 @@ final class DeviceMonitor: ObservableObject {
             }
             // A device kept only in case it was broadcasting, and it was not.
             .filter { $0.hasReading || $0.isConnected || $0.note != nil }
+            .map(markChargingFromMac)
         publish(merge(withAdvertised,
                       withCabled: IOSDeviceMonitor.shared.devices,
                       andBLE: BLEBatteryMonitor.shared.batteries))
@@ -295,7 +329,14 @@ final class DeviceMonitor: ObservableObject {
         // replaced. The report does drop a pod or the case now and then, though, and the
         // broadcast can fill those.
         if device.hasReading && device.isConnected && !device.isRemembered {
-            guard device.kind == .earbuds else { return device }
+            guard device.kind == .earbuds else {
+                // AirPods Max connected to this Mac get their level from the framework,
+                // with no charging state, so the same rising-level evidence applies.
+                guard device.cells.count == 1, let level = device.cells.first?.percent else { return device }
+                var live = device
+                live.isCharging = device.isCharging || isRising(Self.nameKey(device.name), percent: level, seen: Date())
+                return live
+            }
             let have = Set(device.cells.map(\.label))
             let missing = [("L", reading.left), ("R", reading.right), ("Case", reading.casing)]
                 .filter { !have.contains($0.0) }
@@ -336,14 +377,58 @@ final class DeviceMonitor: ObservableObject {
             let have = Set(cells.map(\.label))
             cells = Self.ordered(cells + device.cells.filter { !have.contains($0.label) })
         }
+        // AirPods report charging per part. A single-battery device's broadcast has no
+        // reliable flag, so its level is watched instead.
+        var charging = parts.contains { $0.part.isCharging }
+        if device.kind != .earbuds, let level = parts.first?.part.percent {
+            charging = charging || isRising(Self.nameKey(device.name), percent: level, seen: reading.seen)
+        }
         let live = DeviceBattery(id: device.id, name: device.name, kind: device.kind,
                                  cells: cells,
-                                 isCharging: parts.contains { $0.part.isCharging },
+                                 isCharging: charging,
                                  isConnected: true, note: nil, model: device.model)
         // Kept, so the device still shows its last figure after it stops broadcasting —
         // on macOS 27 nothing else records one for AirPods Max.
         rememberIfComplete(live, seen: reading.seen)
         return live
+    }
+
+    /// A paired device drawing power from one of this Mac's ports is charging, whatever its
+    /// own report says. The port knows the device by its USB serial number, which is the
+    /// same one the Bluetooth report gives.
+    private func markChargingFromMac(_ device: DeviceBattery) -> DeviceBattery {
+        let keys = Set(chargingFromMac.compactMap { bySerial[$0].map { Self.nameKey($0.name) } })
+        guard device.hasReading, keys.contains(Self.nameKey(device.name)) else { return device }
+        var charging = device
+        charging.isCharging = true
+        return charging
+    }
+
+    /// True while a broadcast level is rising. A rise only counts against a reading from
+    /// the last ten minutes, so a device that comes back higher after hours away is not
+    /// taken as charging. It lapses ten minutes after the last rise — while charging, a
+    /// rise comes about every minute — so a device taken off the charger stops showing as
+    /// charging soon after, even while its level holds. A fall ends it at once.
+    private func isRising(_ key: String, percent: Int, seen: Date) -> Bool {
+        var trend = levelTrend[key] ?? (percent, seen, nil, false)
+        if seen.timeIntervalSince(trend.seen) < 600 {
+            // A step back up straight after a step down is the gauge settling, not a charger.
+            if percent > trend.percent {
+                if !trend.justFell { trend.lastRise = seen }
+                trend.justFell = false
+            }
+            if percent < trend.percent {
+                trend.lastRise = nil
+                trend.justFell = true
+            }
+        } else if percent != trend.percent {
+            trend.lastRise = nil
+            trend.justFell = false
+        }
+        trend.percent = percent
+        trend.seen = seen
+        levelTrend[key] = trend
+        return trend.lastRise.map { seen.timeIntervalSince($0) < 10 * 60 } ?? false
     }
 
     /// Records a case level from the case's own broadcast, unless a newer one is known.
@@ -592,6 +677,7 @@ final class DeviceMonitor: ObservableObject {
             model: model
         )
         device.isBareLELink = bareLE
+        device.serialNumber = info["device_serialNumber"] as? String
         return device
     }
 

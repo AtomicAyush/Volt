@@ -24,6 +24,7 @@ struct DeviceBattery: Identifiable, Equatable {
         static func from(minorType: String?, name: String) -> Kind {
             let n = name.lowercased()
             if n.contains("airpods pro") || n.contains("airpods") && !n.contains("max") { return .earbuds }
+            if n.contains("airpods max") { return .headphones }
             if n.contains("trackpad") { return .trackpad }
             if n.contains("iphone") { return .phone }
             if n.contains("ipad") { return .tablet }
@@ -49,7 +50,7 @@ struct DeviceBattery: Identifiable, Equatable {
     let name: String
     let kind: Kind
     var cells: [Cell]
-    let isCharging: Bool
+    var isCharging: Bool
     /// True when the level is live: from macOS for a connected device, from IOBluetooth,
     /// or from the device's own broadcast. False for a level Volt remembered, or one the
     /// report still lists for a device that is off with nothing broadcasting; either is
@@ -67,6 +68,9 @@ struct DeviceBattery: Identifiable, Equatable {
     /// The level came from Volt's own memory of an earlier reading, not from anything
     /// the device is reporting now.
     var isRemembered: Bool = false
+    /// From the Bluetooth report; the same serial a device reports over USB, which is how
+    /// something charging from one of the Mac's ports is named.
+    var serialNumber: String?
 
     /// The cell most at risk — what alerts and the sort order key off.
     var lowestPercent: Int { cells.map(\.percent).min() ?? 100 }
