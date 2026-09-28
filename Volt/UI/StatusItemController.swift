@@ -93,7 +93,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSWindowDelegate 
         } else {
             BatteryMonitor.shared.refresh()
             DeviceMonitor.shared.refresh()
-            EnergyMonitor.shared.sample()
+            EnergyMonitor.shared.sample(record: false)
             popoverContent.rootView = AnyView(
                 PopoverView(openSettings: { [weak self] in self?.openSettings() },
                             quit: { NSApp.terminate(nil) })

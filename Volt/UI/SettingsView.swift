@@ -483,11 +483,11 @@ struct GeneralSettings: View {
             }
 
             Section {
-                Toggle("Track which apps drain the battery", isOn: $prefs.trackEnergy)
+                Toggle("Track which apps drain the battery and use the CPU", isOn: $prefs.trackEnergy)
                     .onChange(of: prefs.trackEnergy) { _, on in
                         on ? EnergyMonitor.shared.start() : EnergyMonitor.shared.stop()
                     }
-                Text("Volt samples running processes every two minutes and keeps 30 days of history in Application Support, on this Mac only.")
+                Text("Volt samples running processes every two minutes — every ten seconds while the panel shows Now — and keeps 30 days of energy and CPU history in Application Support, on this Mac only.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             } header: {

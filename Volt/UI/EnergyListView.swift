@@ -61,8 +61,11 @@ struct EnergyListView: View {
 
 struct EnergyRow: View {
     let entry: EnergyEntry
+    var metric: UsageMetric = .energy
     let peak: Double
     let series: [Double]
+
+    private var value: Double { metric == .energy ? entry.impact : entry.cpu }
 
     var body: some View {
         HStack(spacing: 9) {
@@ -82,7 +85,7 @@ struct EnergyRow: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.08))
                         Capsule().fill(tint)
-                            .frame(width: max(3, geo.size.width * CGFloat(entry.impact / max(peak, 1))))
+                            .frame(width: max(3, geo.size.width * CGFloat(value / max(peak, 1))))
                     }
                 }
                 .frame(height: 4)
@@ -93,16 +96,18 @@ struct EnergyRow: View {
                     .frame(width: 42, height: 16)
             }
 
-            Text(String(format: "%.0f", entry.impact))
+            Text(metric == .energy ? String(format: "%.0f", value) : String(format: "%.0f%%", value))
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 28, alignment: .trailing)
+                .lineLimit(1)
+                .frame(width: metric == .energy ? 30 : 40, alignment: .trailing)
         }
     }
 
+    /// Energy impact and CPU share the same rough scale — about 100 is one core flat out.
     private var tint: Color {
-        switch entry.impact {
+        switch value {
         case ..<20: return .green
         case ..<60: return .orange
         default: return .red

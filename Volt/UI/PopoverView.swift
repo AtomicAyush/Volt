@@ -46,6 +46,7 @@ struct DisabledCard: View {
 enum PopoverMemory {
     static var tab: PanelTab = .battery
     static var energyWindow: EnergyWindow = .live
+    static var usageMetric: UsageMetric = .energy
     static var contentHeight: CGFloat = 520
 }
 
@@ -463,12 +464,26 @@ struct DevicesCard: View {
 struct EnergyCard: View {
     @ObservedObject private var monitor = EnergyMonitor.shared
     @State private var window = PopoverMemory.energyWindow
+    @State private var metric = PopoverMemory.usageMetric
 
     var body: some View {
         Card {
-            SectionHeader(symbol: "bolt.fill", tint: Panel.amber,
-                          title: "Energy Use")
-                .sectionDivider()
+            HStack(spacing: 9) {
+                Image(systemName: metric == .energy ? "bolt.fill" : "cpu")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(metric == .energy ? Panel.amber : Panel.blue)
+                    .frame(width: 18, height: 18)
+                Text(metric == .energy ? "Energy Use" : "CPU Use")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Panel.label)
+                Spacer()
+                Segments(options: UsageMetric.allCases, title: { $0.rawValue }, selection: $metric)
+                    .frame(width: 118)
+                    .onChange(of: metric) { _, metric in PopoverMemory.usageMetric = metric }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .sectionDivider()
 
             VStack(alignment: .leading, spacing: 10) {
                 Segments(options: EnergyWindow.allCases,
@@ -476,7 +491,9 @@ struct EnergyCard: View {
                          selection: $window)
                     .onChange(of: window) { _, window in PopoverMemory.energyWindow = window }
 
-                if !monitor.callouts.isEmpty {
+                if metric == .cpu {
+                    systemLine
+                } else if !monitor.callouts.isEmpty {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
@@ -490,21 +507,69 @@ struct EnergyCard: View {
                     .background(RoundedRectangle(cornerRadius: 7).fill(Panel.amber.opacity(0.12)))
                 }
 
-                let entries = monitor.ranked(window)
+                let entries = monitor.ranked(window, by: metric)
                 if entries.isEmpty {
                     Text(window == .live ? "Sampling…"
                          : "No history for this window yet — Volt fills it in as it runs.")
                         .font(.system(size: 11))
                         .foregroundStyle(Panel.secondary)
                 } else {
-                    let peak = entries.map(\.impact).max() ?? 1
+                    let peak = entries.map { metric == .energy ? $0.impact : $0.cpu }.max() ?? 1
                     ForEach(entries) { entry in
-                        EnergyRow(entry: entry, peak: peak,
-                                  series: monitor.series(for: entry.name, window: window))
+                        EnergyRow(entry: entry, metric: metric, peak: peak,
+                                  series: monitor.series(for: entry.name, window: window, by: metric))
+                    }
+                    if metric == .cpu {
+                        Text("Per app, 100% is one core fully busy.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Panel.tertiary)
                     }
                 }
             }
             .padding(14)
+        }
+        // "Now" follows along while it is on screen. The task ends when the panel closes,
+        // as its view is dropped then.
+        .task(id: window) {
+            guard window == .live else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled else { return }
+                monitor.sample(record: false)
+            }
+        }
+    }
+
+    /// "over 24h", or "since 8:40 PM" while the CPU history is younger than the window.
+    private var coverage: String {
+        if let start = monitor.cpuHistoryStart(window) {
+            let style: Date.FormatStyle
+            if Calendar.current.isDateInToday(start) {
+                style = .dateTime.hour().minute()
+            } else if start > Date().addingTimeInterval(-6 * 24 * 3600) {
+                style = .dateTime.weekday(.abbreviated).hour().minute()
+            } else {
+                style = .dateTime.month(.abbreviated).day()   // a weekday a week back is ambiguous
+            }
+            return "since " + start.formatted(style)
+        }
+        return "over \(window.rawValue)"
+    }
+
+    /// How busy the whole Mac is, as a share of all its cores.
+    @ViewBuilder private var systemLine: some View {
+        if let busy = monitor.systemCPU(window) {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Panel.blue)
+                Text(window == .live
+                     ? String(format: "Whole Mac %.0f%% busy across %d cores", busy, monitor.coreCount)
+                     : String(format: "Whole Mac averaged %.0f%% busy %@", busy, coverage))
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Panel.secondary)
+            }
         }
     }
 }

@@ -30,6 +30,17 @@ struct EnergySample: Codable {
     let date: Date
     /// Process name to energy impact at that moment.
     let byApp: [String: Double]
+    /// Process name to CPU use, in percent of one core as Activity Monitor shows it.
+    /// Absent from samples recorded before CPU was kept.
+    var cpuByApp: [String: Double]?
+    /// The whole Mac's CPU use, user plus system, in percent of all cores.
+    var systemCPU: Double?
+}
+
+/// What the app list ranks by.
+enum UsageMetric: String, CaseIterable, Identifiable {
+    case energy = "Energy", cpu = "CPU"
+    var id: String { rawValue }
 }
 
 enum EnergyWindow: String, CaseIterable, Identifiable {
@@ -52,6 +63,10 @@ final class EnergyMonitor: ObservableObject {
     static let shared = EnergyMonitor()
 
     @Published private(set) var live: [EnergyEntry] = []
+    /// The whole Mac's CPU use in the latest sample, in percent of all cores.
+    @Published private(set) var systemCPU: Double?
+    /// Cores the percentages are out of: 100% per app is one of these fully busy.
+    let coreCount = ProcessInfo.processInfo.activeProcessorCount
     @Published private(set) var history: [EnergySample] = []
     /// Apps drawing far more than their usual share right now.
     @Published private(set) var callouts: [String] = []
@@ -59,6 +74,9 @@ final class EnergyMonitor: ObservableObject {
     private var timer: Timer?
     private let queue = DispatchQueue(label: "volt.energy", qos: .utility)
     private var isSampling = false
+    private var recordPending = false
+    /// History is written here, off the main thread: the file is a few megabytes.
+    private let saveQueue = DispatchQueue(label: "volt.energy.save", qos: .utility)
     private var iconCache: [String: NSImage] = [:]
 
     private var storeURL: URL {
@@ -72,6 +90,7 @@ final class EnergyMonitor: ObservableObject {
 
     func start(interval: TimeInterval = 120) {
         sample()
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.sample()
         }
@@ -82,27 +101,60 @@ final class EnergyMonitor: ObservableObject {
 
     /// Ranked apps for a window. `.live` is the latest sample; the rest average
     /// every stored sample inside the window so a brief spike cannot dominate.
-    func ranked(_ window: EnergyWindow, limit: Int = 8) -> [EnergyEntry] {
-        guard let interval = window.interval else { return Array(live.prefix(limit)) }
+    func ranked(_ window: EnergyWindow, by metric: UsageMetric = .energy, limit: Int = 8) -> [EnergyEntry] {
+        let liveRanked = metric == .energy ? live.filter { $0.impact > 0.1 } : live.sorted { $0.cpu > $1.cpu }
+        guard let interval = window.interval else { return Array(liveRanked.prefix(limit)) }
 
         let cutoff = Date().addingTimeInterval(-interval)
-        let samples = history.filter { $0.date >= cutoff }
-        guard !samples.isEmpty else { return Array(live.prefix(limit)) }
+        // CPU is averaged only over samples that recorded it, so the older history
+        // kept before CPU was does not pull every average towards zero.
+        let samples = history.filter { $0.date >= cutoff && (metric == .energy || $0.cpuByApp != nil) }
+        guard !samples.isEmpty else { return metric == .energy ? Array(liveRanked.prefix(limit)) : [] }
 
         var totals: [String: Double] = [:]
         for sample in samples {
-            for (name, impact) in sample.byApp { totals[name, default: 0] += impact }
+            for (name, value) in values(in: sample, metric) ?? [:] { totals[name, default: 0] += value }
         }
         let divisor = Double(samples.count)
         return totals
-            .map { EnergyEntry(name: $0.key, pid: 0, impact: $0.value / divisor, cpu: 0, icon: icon(for: $0.key)) }
-            .sorted { $0.impact > $1.impact }
+            .map { name, total in
+                let average = total / divisor
+                return EnergyEntry(name: name, pid: 0,
+                                   impact: metric == .energy ? average : 0,
+                                   cpu: metric == .cpu ? average : 0,
+                                   icon: icon(for: name))
+            }
+            .sorted { metric == .energy ? $0.impact > $1.impact : $0.cpu > $1.cpu }
             .prefix(limit)
             .map { $0 }
     }
 
+    /// The whole Mac's CPU use: the latest reading, or the average over a window.
+    func systemCPU(_ window: EnergyWindow) -> Double? {
+        guard let interval = window.interval else { return systemCPU }
+        let cutoff = Date().addingTimeInterval(-interval)
+        let readings = history.filter { $0.date >= cutoff }.compactMap(\.systemCPU)
+        guard !readings.isEmpty else { return nil }
+        return readings.reduce(0, +) / Double(readings.count)
+    }
+
+    /// When the CPU samples in a window start, if that is well after the window does — CPU
+    /// has only been kept since recently — so an average can say what it covers.
+    func cpuHistoryStart(_ window: EnergyWindow) -> Date? {
+        guard let interval = window.interval else { return nil }
+        let cutoff = Date().addingTimeInterval(-interval)
+        guard let first = history.first(where: { $0.date >= cutoff && $0.cpuByApp != nil })?.date,
+              first.timeIntervalSince(cutoff) > interval * 0.1 else { return nil }
+        return first
+    }
+
+    private func values(in sample: EnergySample, _ metric: UsageMetric) -> [String: Double]? {
+        metric == .energy ? sample.byApp : sample.cpuByApp
+    }
+
     /// A per-app series for the sparklines, bucketed evenly across the window.
-    func series(for app: String, window: EnergyWindow, buckets: Int = 24) -> [Double] {
+    func series(for app: String, window: EnergyWindow, by metric: UsageMetric = .energy,
+                buckets: Int = 24) -> [Double] {
         guard let interval = window.interval else { return [] }
         let now = Date()
         let cutoff = now.addingTimeInterval(-interval)
@@ -111,27 +163,45 @@ final class EnergyMonitor: ObservableObject {
         var sums = [Double](repeating: 0, count: buckets)
         var counts = [Int](repeating: 0, count: buckets)
         for sample in history where sample.date >= cutoff {
+            guard let values = values(in: sample, metric) else { continue }
             let index = min(buckets - 1, max(0, Int(sample.date.timeIntervalSince(cutoff) / width)))
-            sums[index] += sample.byApp[app] ?? 0
+            sums[index] += values[app] ?? 0
             counts[index] += 1
         }
-        return zip(sums, counts).map { $1 > 0 ? $0 / Double($1) : 0 }
+        let values = zip(sums, counts).map { $1 > 0 ? $0 / Double($1) : 0 }
+        // CPU has only been kept since recently: start the line where it starts, rather
+        // than drawing the time before as idle.
+        if metric == .cpu, let first = counts.firstIndex(where: { $0 > 0 }) {
+            return Array(values[first...])
+        }
+        return values
     }
 
     // MARK: - Sampling
 
-    func sample() {
-        guard !isSampling else { return }
+    /// `record` adds the reading to the history. Only the two-minute timer records, so
+    /// the history keeps an even cadence and its averages are not tilted towards the
+    /// times the panel happened to be open; the panel's own refreshes pass false. A
+    /// recording request that arrives while a reading is under way records that one.
+    func sample(record: Bool = true) {
+        guard !isSampling else {
+            if record { recordPending = true }
+            return
+        }
         isSampling = true
+        recordPending = record
         queue.async {
-            let rows = Self.readTop()
+            let (rows, systemCPU) = Self.readTop()
             DispatchQueue.main.async {
                 self.isSampling = false
+                let shouldRecord = self.recordPending
+                self.recordPending = false
                 guard !rows.isEmpty else { return }
                 let entries = self.resolve(rows)
                 guard !entries.isEmpty else { return }
                 self.live = entries
-                self.record(entries)
+                self.systemCPU = systemCPU
+                if shouldRecord { self.record(entries, systemCPU: systemCPU) }
                 self.recomputeCallouts()
             }
         }
@@ -197,16 +267,19 @@ final class EnergyMonitor: ObservableObject {
 
     /// Two samples are required: `top`'s first pass reports lifetime averages, the
     /// second reports the interval we actually care about.
-    private static func readTop() -> [Row] {
+    /// Also returns the whole Mac's CPU use from the same pass: top's "CPU usage" line,
+    /// user plus system.
+    private static func readTop() -> (rows: [Row], systemCPU: Double?) {
         guard let out = Shell.run("/usr/bin/top",
                                   ["-l", "2", "-n", "25", "-o", "cpu",
                                    "-stats", "pid,cpu,power,command"], timeout: 25)
-        else { return [] }
+        else { return ([], nil) }
 
         // Keep only the rows after the final header line.
         let lines = out.split(separator: "\n", omittingEmptySubsequences: false)
         guard let headerIndex = lines.lastIndex(where: { $0.contains("PID") && $0.contains("COMMAND") })
-        else { return [] }
+        else { return ([], nil) }
+        let systemCPU = lines.last(where: { $0.hasPrefix("CPU usage:") }).flatMap(Self.busyPercent)
 
         var rows: [Row] = []
         for line in lines[(headerIndex + 1)...] {
@@ -217,12 +290,32 @@ final class EnergyMonitor: ObservableObject {
                   let power = Double(fields[2]) else { continue }
 
             let command = String(fields[3]).trimmingCharacters(in: .whitespaces)
-            guard pid != 0, power > 0.1 else { continue }
+            // kernel_task (pid 0) reports no energy but a good deal of CPU; keep any row
+            // that has either.
+            guard power > 0.1 || cpu > 0.1 else { continue }
             // Don't report the sampler Volt just spawned.
             guard command != "top" else { continue }
             rows.append(Row(pid: pid, cpu: cpu, power: power, command: command))
         }
-        return rows
+        return (rows, systemCPU)
+    }
+
+    /// "CPU usage: 21.9% user, 6.80% sys, 72.10% idle" → 27.89.
+    ///
+    /// top prints each figure as whole and hundredths without zero-padding the second,
+    /// so "21.9%" is 21.09 — lines read that way add up to 100, read as decimals they do
+    /// not — and the part after the point is taken as hundredths.
+    private static func busyPercent(_ line: Substring) -> Double? {
+        func value(_ label: String) -> Double? {
+            guard let range = line.range(of: "% \(label)"),
+                  let number = line[..<range.lowerBound].split(separator: " ").last else { return nil }
+            let parts = number.split(separator: ".", maxSplits: 1)
+            guard let whole = parts.first.flatMap({ Double($0) }) else { return nil }
+            let hundredths = parts.count > 1 ? (Double(parts[1]) ?? 0) : 0
+            return whole + hundredths / 100
+        }
+        guard let user = value("user"), let system = value("sys") else { return nil }
+        return user + system
     }
 
     /// "Spotify Helper (Renderer)" and "Google Chrome He" both belong to their parent app.
@@ -236,10 +329,15 @@ final class EnergyMonitor: ObservableObject {
         return name.trimmingCharacters(in: .whitespaces)
     }
 
-    private func record(_ entries: [EnergyEntry]) {
+    private func record(_ entries: [EnergyEntry], systemCPU: Double?) {
         var byApp: [String: Double] = [:]
-        for entry in entries.prefix(15) { byApp[entry.name] = entry.impact }
-        history.append(EnergySample(date: Date(), byApp: byApp))
+        for entry in entries.prefix(15) where entry.impact > 0.1 { byApp[entry.name] = entry.impact }
+        // The fifteen busiest by CPU, which are not always the fifteen by energy.
+        var cpuByApp: [String: Double] = [:]
+        for entry in entries.sorted(by: { $0.cpu > $1.cpu }).prefix(15) where entry.cpu > 0 {
+            cpuByApp[entry.name] = entry.cpu
+        }
+        history.append(EnergySample(date: Date(), byApp: byApp, cpuByApp: cpuByApp, systemCPU: systemCPU))
 
         let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
         history.removeAll { $0.date < cutoff }
@@ -286,8 +384,13 @@ final class EnergyMonitor: ObservableObject {
     /// rows of their own; fold those the same way, so the app's past and present
     /// figures compare like for like.
     private static func foldingWebKitHelpers(_ sample: EnergySample) -> EnergySample {
+        EnergySample(date: sample.date, byApp: folded(sample.byApp),
+                     cpuByApp: sample.cpuByApp.map(folded), systemCPU: sample.systemCPU)
+    }
+
+    private static func folded(_ values: [String: Double]) -> [String: Double] {
         var byApp: [String: Double] = [:]
-        for (name, impact) in sample.byApp {
+        for (name, impact) in values {
             // "Safari Web Content (Cached)" is a Safari helper too.
             var base = name
             if name.hasSuffix(")"), let open = name.range(of: " (", options: .backwards) {
@@ -301,11 +404,14 @@ final class EnergyMonitor: ObservableObject {
             if owner.isEmpty { owner = name }
             byApp[owner, default: 0] += impact
         }
-        return EnergySample(date: sample.date, byApp: byApp)
+        return byApp
     }
 
     private func saveHistory() {
-        guard let data = try? JSONEncoder().encode(history) else { return }
-        try? data.write(to: storeURL, options: .atomic)
+        let snapshot = history, url = storeURL
+        saveQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }

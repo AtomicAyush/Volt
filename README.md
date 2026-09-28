@@ -1,7 +1,7 @@
 # Volt
 
 A battery menu bar app for macOS. Custom low-battery alerts at any level you choose,
-battery health and lifecycle tracking, accessory batteries, and per-app energy use.
+battery health and lifecycle tracking, accessory batteries, and per-app energy and CPU use.
 
 macOS only warns you at 10% and 5%, will not let you change those levels, and shows
 nothing about the health of the pack. Volt fills that in.
@@ -58,9 +58,12 @@ figure, that is shown in preference to the computed one.
 Keyboard and Magic Trackpad come from the IO registry. iPhone and iPad battery is read
 over Bluetooth, with no cable — see below.
 
-**Energy use.** Which apps are draining the battery, using the same Energy Impact figure
-Activity Monitor shows, with 24h / 7d / 30d history kept on disk and a callout when an
-app climbs well above its own baseline.
+**Energy and CPU use.** Which apps are draining the battery, using the same Energy
+Impact figure Activity Monitor shows, with 24h / 7d / 30d history kept on disk and a
+callout when an app climbs well above its own baseline. A switch shows the same list by
+CPU instead — per app as Activity Monitor counts it, where 100% is one core fully busy —
+with how busy the whole Mac is across all its cores. While the panel is open on "Now",
+both follow along every ten seconds.
 
 ![Alerts](docs/alerts.png)
 
@@ -217,7 +220,7 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 | Condition, Apple's Maximum Capacity | `system_profiler SPPowerDataType`, every 15 min |
 | AirPods and Bluetooth accessories | `system_profiler SPBluetoothDataType`, IOBluetooth, and AirPods' own Continuity advertisements through CoreBluetooth |
 | Magic Mouse / Keyboard / Trackpad | `ioreg -k BatteryPercent` |
-| Per-app energy | `top -stats pid,cpu,power,command` |
+| Per-app energy and CPU, whole-Mac CPU | `top -stats pid,cpu,power,command`, and its `CPU usage` line |
 | iPhone / iPad level | CoreBluetooth GATT `0x180F` / `0x2A19` |
 | iPhone / iPad health (cable) | `MobileDevice.framework`, resolved with `dlsym` |
 
