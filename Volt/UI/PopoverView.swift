@@ -231,7 +231,8 @@ struct StatusCard: View {
         }
     }
 
-    /// "2h 10m", or nil while the gauge is still working it out.
+    /// "2h 10m", or nil while there is no estimate yet — Volt's own on battery, the
+    /// gauge's while charging.
     private var shortTime: String? {
         guard let m = snapshot.minutesRemaining, m > 0 else { return nil }
         let h = m / 60, mm = m % 60

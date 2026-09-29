@@ -2,6 +2,7 @@ import Foundation
 import IOKit
 import IOKit.ps
 import Combine
+import AppKit
 
 /// Reads the internal battery from IOKit and republishes it whenever it changes.
 ///
@@ -18,6 +19,7 @@ final class BatteryMonitor: ObservableObject {
 
     private var runLoopSource: CFRunLoopSource?
     private var timer: Timer?
+    private var cancellables = Set<AnyCancellable>()
     private var lastProfilerRefresh: Date = .distantPast
     private var interestNotification: io_object_t = IO_OBJECT_NULL
     private var notifyPort: IONotificationPortRef?
@@ -28,6 +30,19 @@ final class BatteryMonitor: ObservableObject {
         refresh()
         installPowerSourceNotification()
         installBatteryInterestNotification()
+
+        // Low Power Mode and waking from sleep change the draw at once; let the time
+        // estimate follow quickly. Duplicates are removed before the current value is
+        // dropped, so only a real change counts.
+        LowPowerMode.shared.$isEnabled
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.drawChanged() }
+            .store(in: &cancellables)
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didWakeNotification)
+            .sink { [weak self] _ in self?.drawChanged() }
+            .store(in: &cancellables)
 
         // The SMC refreshes about once a second, so that is the cadence worth
         // sampling at. The interest notification above still catches registry
@@ -86,7 +101,8 @@ final class BatteryMonitor: ObservableObject {
         new.appleMaxCapacity = snapshot.appleMaxCapacity
         applyPowerSourceInfo(to: &new)
         applyFastChargingState(to: &new)
-        estimateTimeIfNeeded(for: &new)
+        if new.isPluggedIn != snapshot.isPluggedIn { drawChanged() }
+        estimateTime(for: &new)
         new.updated = Date()
 
         guard new != snapshot else { return }
@@ -266,28 +282,54 @@ final class BatteryMonitor: ObservableObject {
         if !s.isPluggedIn { s.isCharging = false }
     }
 
-    /// Smoothed current, so a time estimate does not jump every second with the load.
+    /// The live current, smoothed, and when the draw last changed character — on the
+    /// monotonic clock, since a wall-clock step would otherwise throw the average out.
     private var smoothedAmperage: Double?
+    private var lastSmoothed: TimeInterval?
+    private var drawChangedAt = ProcessInfo.processInfo.systemUptime
 
-    /// The gauge's own estimate is missing for a while after the power state changes.
-    /// In that gap, work one out from the charge left to gain or lose and the smoothed
-    /// current, so the panel says something better than "Estimating".
-    private func estimateTimeIfNeeded(for s: inout BatterySnapshot) {
+    /// Something that changes how much power the Mac uses just happened — Low Power Mode,
+    /// plugging in or out, waking from sleep — so the average starts over.
+    func drawChanged() {
+        drawChangedAt = ProcessInfo.processInfo.systemUptime
+        smoothedAmperage = nil
+    }
+
+    /// Time left on battery comes from Volt's own reading: the charge left over the live
+    /// current, averaged. The gauge's own figure only moves when its registry entry
+    /// republishes, about once a minute, and then takes the current of that moment, so
+    /// after Low Power Mode went on it sat unchanged for most of a minute and then jumped
+    /// about — 63, 47, 55, 46 minutes in two — while the draw had already halved.
+    ///
+    /// After a change the average is a plain mean of every reading since, so it follows
+    /// within seconds and one odd reading soon counts for little; from a minute and a half
+    /// on it becomes a moving average over that long, so it holds steady.
+    ///
+    /// Charging keeps the gauge's estimate, which knows how charging slows near full; this
+    /// only fills in when it has none.
+    private func estimateTime(for s: inout BatterySnapshot) {
+        let now = ProcessInfo.processInfo.systemUptime
         let amps = s.amperage
-        if let previous = smoothedAmperage, (previous > 0) == (amps > 0) {
-            smoothedAmperage = previous * 0.8 + amps * 0.2
+        // A current near zero — plugged in and full, or held at a charge limit — says
+        // nothing about what comes next, so the next real reading starts afresh.
+        if let previous = smoothedAmperage, abs(previous) > 0.05, (previous > 0) == (amps > 0) {
+            let elapsed = min(5, max(0, lastSmoothed.map { now - $0 } ?? 1))
+            let span = min(90, 1 + (now - drawChangedAt))
+            smoothedAmperage = previous + (amps - previous) * (1 - exp(-elapsed / span))
         } else {
-            smoothedAmperage = amps       // direction changed: start again
+            if smoothedAmperage != nil { drawChangedAt = now }
+            smoothedAmperage = amps
         }
-        guard s.minutesRemaining == nil, let current = smoothedAmperage,
-              abs(current) > 0.05, s.rawMaxCapacity > 0 else { return }
+        lastSmoothed = now
 
-        let milliampHours = s.isCharging
-            ? Double(max(0, s.rawMaxCapacity - s.rawCurrentCapacity))
-            : Double(s.rawCurrentCapacity)
-        guard (s.isCharging && current > 0) || (!s.isCharging && current < 0) else { return }
-        let minutes = milliampHours / (abs(current) * 1000) * 60
-        s.minutesRemaining = Self.sanitize(Int(minutes.rounded()))
+        guard let current = smoothedAmperage, abs(current) > 0.05, s.rawMaxCapacity > 0 else { return }
+        if s.isDischarging, current < 0, s.rawCurrentCapacity > 0 {
+            let minutes = Double(s.rawCurrentCapacity) / (-current * 1000) * 60
+            s.minutesRemaining = Self.sanitize(Int(minutes.rounded()))
+        } else if s.minutesRemaining == nil, s.isCharging, current > 0 {
+            let minutes = Double(max(0, s.rawMaxCapacity - s.rawCurrentCapacity)) / (current * 1000) * 60
+            s.minutesRemaining = Self.sanitize(Int(minutes.rounded()))
+        }
     }
 
     /// The BatteryData of the AppleSmartBatteryPack child entry, where macOS 27 keeps

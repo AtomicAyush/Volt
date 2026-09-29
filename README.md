@@ -34,6 +34,13 @@ registry. The registry republishes on its own schedule — eight seconds or more
 updates — so a readout taken from it visibly lags and repeats. The controller refreshes
 about once a second, which is what makes the numbers look live.
 
+**Time left that follows the draw.** On battery Volt works the time out itself, from
+the charge left and the live current, averaged: right after the draw changes — Low Power
+Mode switched, the charger pulled, the Mac woken — it follows within seconds, and after
+that it holds steady. The gauge's own figure moves only about once a minute and takes the
+current of that moment, so it lags a change and then jumps about. Charging keeps the
+gauge's time to full, which knows how charging slows near the top.
+
 **Power flow.** Plugged in, the adapter's output splits between charging the pack and
 running the Mac — shown as ribbons whose thickness is their share, with what the adapter
 is actually delivering on one side and where the watts land on the other. On battery the
@@ -214,6 +221,7 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 | --- | --- |
 | Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry — on macOS 27 also its `BatteryData` and that of the `AppleSmartBatteryPack` child — with `AppleSMC` `TB0T` as a temperature fallback |
 | Current, voltage, adapter input | `AppleSMC` keys `B0AC`, `B0AV`, `PDTR`, `PPBR` |
+| Time left on battery | Remaining capacity over the averaged `B0AC` current; time to full from the gauge's `AvgTimeToFull` |
 | Power out of each USB-C port | `AppleSMC` keys `D<n>JV`, `D<n>JI` and power role `D<n>PR`; the device from the port's own USB record (`IOPortTransportStateUSB3`/`USB2`), named after the paired Bluetooth device or cabled iPhone with the same serial |
 | Adapter and system power fallback | `BatteryData.AdapterPower` / `SystemPower`; on macOS 27, `PowerTelemetryData.SystemLoad` |
 | Change notifications | `IOPSNotificationCreateRunLoopSource`, plus a `kIOGeneralInterest` notification on the battery itself |
