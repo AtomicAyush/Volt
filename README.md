@@ -25,6 +25,12 @@ three, so the icon and the readout can never disagree.
 state on a tinted chip, the wattage in the same colour, and a highlight running along
 the meter — movement being the one cue that reads as charging without being labelled.
 
+**Plugged in, not charging.** A plug takes the bolt's place in the menu bar and the panel
+says why: held at 80% by Optimized Battery Charging, running down to that limit after a
+full charge, held at a charge limit, full, or a charger that can't keep up — the last
+shown only once the battery has been making up the difference for a minute, since macOS
+still calls that charging.
+
 **A panel per topic.** Health, temperature, power, capacity, devices and energy are each
 their own panel, reached from a selector at the top rather than by scrolling past
 everything.
@@ -221,6 +227,7 @@ appear, allow Volt under System Settings › Privacy & Security › Bluetooth.
 | --- | --- |
 | Charge, health, cycles, temperature | `AppleSmartBattery` in the IO registry — on macOS 27 also its `BatteryData` and that of the `AppleSmartBatteryPack` child — with `AppleSMC` `TB0T` as a temperature fallback |
 | Current, voltage, adapter input | `AppleSMC` keys `B0AC`, `B0AV`, `PDTR`, `PPBR` |
+| Why it is not charging | `ChargerData.NotChargingReason` in the IO registry, and the charge policy powerd is applying, from `/Library/Preferences/com.apple.powerd.charging.plist` |
 | Time left on battery | Remaining capacity over the averaged `B0AC` current; time to full from the gauge's `AvgTimeToFull` |
 | Power out of each USB-C port | `AppleSMC` keys `D<n>JV`, `D<n>JI` and power role `D<n>PR`; the device from the port's own USB record (`IOPortTransportStateUSB3`/`USB2`), named after the paired Bluetooth device or cabled iPhone with the same serial |
 | Adapter and system power fallback | `BatteryData.AdapterPower` / `SystemPower`; on macOS 27, `PowerTelemetryData.SystemLoad` |

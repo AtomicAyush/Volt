@@ -103,6 +103,25 @@ final class BatteryMonitor: ObservableObject {
         applyFastChargingState(to: &new)
         if new.isPluggedIn != snapshot.isPluggedIn { drawChanged() }
         estimateTime(for: &new)
+        let uptime = ProcessInfo.processInfo.systemUptime
+        // A real plug or unplug, not the first reading after launch.
+        if new.isPluggedIn != snapshot.isPluggedIn, snapshot.updated != .distantPast {
+            pluggedInAt = new.isPluggedIn ? uptime : nil
+            policy = nil
+        }
+        if new.isPluggedIn, new.watts < -0.5, (new.adapterPower ?? 0) > 1 {
+            drainingOnChargerSince = drainingOnChargerSince ?? uptime
+        } else {
+            drainingOnChargerSince = nil
+        }
+        new.chargeHold = ChargeHoldReader.hold(
+            notChargingReason: new.notChargingReason, snapshot: new,
+            policy: chargePolicy(pluggedIn: new.isPluggedIn),
+            settled: pluggedInAt.map { uptime - $0 > 10 } ?? true,
+            drainingOnCharger: drainingOnChargerSince.map { uptime - $0 } ?? 0)
+        // A charger that cannot keep up is not charging, whatever macOS says: the menu bar
+        // shows the plug and the power flow shows the battery helping out.
+        if case .chargerTooWeak = new.chargeHold { new.isCharging = false }
         new.updated = Date()
 
         guard new != snapshot else { return }
@@ -189,6 +208,9 @@ final class BatteryMonitor: ObservableObject {
            let milliwatts = telemetry["SystemLoad"] as? Int, milliwatts > 0 {
             s.systemPower = Double(milliwatts) / 1000
         }
+
+        let charger = props["ChargerData"] as? [String: Any] ?? batteryData["ChargerData"] as? [String: Any]
+        s.notChargingReason = charger?["NotChargingReason"] as? Int
 
         applySMC(to: &s)
         applyPortOutputs(to: &s)
@@ -280,6 +302,26 @@ final class BatteryMonitor: ObservableObject {
     private func applyFastChargingState(to s: inout BatterySnapshot) {
         if s.isPluggedIn, s.amperage > 0.1 { s.isCharging = true }
         if !s.isPluggedIn { s.isCharging = false }
+    }
+
+    /// powerd's charge policy, read at most every 15 s and only while plugged in: it
+    /// changes rarely, and only matters then.
+    private var policy: (value: (reason: String, limit: Int)?, read: TimeInterval)?
+    /// When the charger was connected, and since when the battery has been supplying
+    /// power with it connected; both on the monotonic clock.
+    private var pluggedInAt: TimeInterval?
+    private var drainingOnChargerSince: TimeInterval?
+
+    private func chargePolicy(pluggedIn: Bool) -> (reason: String, limit: Int)? {
+        guard pluggedIn else { policy = nil; return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        // powerd writes a new policy a second or two after the charger connects, so it is
+        // looked at more often just after plugging in.
+        let justPlugged = pluggedInAt.map { now - $0 < 20 } ?? false
+        if let policy, now - policy.read < (justPlugged ? 2 : 15) { return policy.value }
+        let value = ChargeHoldReader.activePolicy()
+        policy = (value, now)
+        return value
     }
 
     /// The live current, smoothed, and when the draw last changed character — on the

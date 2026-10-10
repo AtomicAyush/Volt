@@ -301,6 +301,7 @@ struct AppearanceSettings: View {
         var snapshot = battery.snapshot
         snapshot.percentage = level
         snapshot.isCharging = false
+        snapshot.chargeHold = nil
         return snapshot
     }
 

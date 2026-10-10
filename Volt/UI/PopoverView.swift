@@ -138,9 +138,14 @@ struct StatusCard: View {
 
     private var stateText: String {
         if snapshot.isCharging { return "Charging" }
-        if snapshot.isPluggedIn { return snapshot.isFullyCharged ? "Charged" : "Plugged In" }
+        if let hold = snapshot.chargeHold { return hold == .full ? "Charged" : "Not Charging" }
+        if snapshot.isPluggedIn { return "Plugged In" }
         return "On Battery"
     }
+
+    /// Plugged in but not charging: shown as a state of its own, with a plug, so it is not
+    /// mistaken for charging or for running on battery.
+    private var isHeld: Bool { snapshot.chargeHold != nil }
 
     var body: some View {
         Card {
@@ -166,11 +171,16 @@ struct StatusCard: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 0) {
-                        Text(snapshot.isPluggedIn ? "TIME TO FULL" : "TIME LEFT")
+                        Text(isHeld ? "CHARGE" : (snapshot.isPluggedIn ? "TIME TO FULL" : "TIME LEFT"))
                             .font(.system(size: 9.5, weight: .semibold))
                             .tracking(0.6)
                             .foregroundStyle(Panel.secondary)
-                        if let shortTime {
+                        if let hold = snapshot.chargeHold {
+                            Text(hold.short)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(Panel.label)
+                        } else if let shortTime {
                             Text(shortTime)
                                 .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .monospacedDigit()
@@ -192,22 +202,37 @@ struct StatusCard: View {
                         .frame(width: 26, height: 13)
 
                     // While charging the state is tinted and sits on a matching chip,
-                    // so it reads as a state rather than a caption.
-                    Text(stateText)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(snapshot.isCharging ? tint : Panel.label)
-                        .padding(.horizontal, snapshot.isCharging ? 7 : 0)
-                        .padding(.vertical, snapshot.isCharging ? 2 : 0)
-                        .background {
-                            if snapshot.isCharging {
-                                Capsule().fill(tint.opacity(0.16))
-                            }
+                    // so it reads as a state rather than a caption. Plugged in but not
+                    // charging gets a chip of its own, with a plug.
+                    HStack(spacing: 4) {
+                        if isHeld {
+                            Image(systemName: "powerplug.fill")
+                                .font(.system(size: 10, weight: .semibold))
                         }
+                        Text(stateText)
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(snapshot.isCharging ? tint : (isHeld ? Panel.blue : Panel.label))
+                    .padding(.horizontal, snapshot.isCharging || isHeld ? 7 : 0)
+                    .padding(.vertical, snapshot.isCharging || isHeld ? 2 : 0)
+                    .background {
+                        if snapshot.isCharging {
+                            Capsule().fill(tint.opacity(0.16))
+                        } else if isHeld {
+                            Capsule().fill(Panel.blue.opacity(0.16))
+                        }
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
 
                     if lowPower.isEnabled {
-                        HStack(spacing: 3) {
+                        // Just the leaf when the state chip leaves no room for the label.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "leaf.fill").font(.system(size: 9))
+                                Text("Low Power").font(.system(size: 11, weight: .semibold))
+                            }
                             Image(systemName: "leaf.fill").font(.system(size: 9))
-                            Text("Low Power").font(.system(size: 11, weight: .semibold))
                         }
                         .foregroundStyle(AlertColor.yellow.color)
                         .padding(.horizontal, 6)
@@ -226,6 +251,18 @@ struct StatusCard: View {
                 MeterBar(fraction: Double(snapshot.percentage) / 100,
                          tint: tint, segments: 4, height: 8,
                          isCharging: snapshot.isCharging)
+
+                if let hold = snapshot.chargeHold {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: "powerplug.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Panel.blue)
+                        Text(hold.explanation)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Panel.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .padding(14)
         }

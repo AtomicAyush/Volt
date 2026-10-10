@@ -61,9 +61,12 @@ enum MenuBarIcon {
     /// otherwise a number straddling the edge of the fill renders half dark, half light.
     private static func pill(snapshot: BatterySnapshot, showNumber: Bool, colored: Bool) -> NSImage {
         // Charging widens the shell so the bolt can sit inside it, alongside the
-        // digits, instead of being tacked on outside where it is easy to miss.
+        // digits, instead of being tacked on outside where it is easy to miss. Plugged in
+        // but not charging puts a plug in the same place.
         let charging = snapshot.isCharging
-        let bodyWidth: CGFloat = showNumber ? (charging ? 41 : 32) : 24
+        let held = !charging && snapshot.chargeHold != nil
+        // The plug is wider than the bolt, so it gets a little more room.
+        let bodyWidth: CGFloat = showNumber ? (charging ? 41 : (held ? 45 : 32)) : 24
         let bodyHeight: CGFloat = 13.5
         let capWidth: CGFloat = 2
         let capGap: CGFloat = 1.5
@@ -121,7 +124,8 @@ enum MenuBarIcon {
         if showNumber {
             let ink = colored ? contrasting(with: fill) : NSColor.black
             let boltWidth: CGFloat = 7
-            let boltSpace: CGFloat = charging ? boltWidth + 2.5 : 0
+            let plugWidth: CGFloat = 11
+            let boltSpace: CGFloat = charging ? boltWidth + 2.5 : (held ? plugWidth + 2.5 : 0)
 
             let text = "\(snapshot.percentage)"
             let size: CGFloat = text.count > 2 ? 9 : 10
@@ -139,6 +143,9 @@ enum MenuBarIcon {
                     ink.setFill()
                     boltPath(in: NSRect(x: shell.minX + 3, y: shell.midY - 5.5,
                                         width: boltWidth, height: 11)).fill()
+                } else if held {
+                    ink.setFill()
+                    plugPath(in: NSRect(x: shell.minX + 2.5, y: shell.midY - 4.5, width: plugWidth, height: 9)).fill()
                 }
                 text.draw(at: origin, withAttributes: attributes)
             }
@@ -160,6 +167,14 @@ enum MenuBarIcon {
             overlay(in: levelRect, shell: shell) { knockout in
                 (knockout ? NSColor.black : NSColor.labelColor).setFill()
                 boltPath(in: boltRect).fill()
+            }
+        } else if held {
+            let plugRect = NSRect(x: shell.midX - 5.5, y: shell.midY - 4.5, width: 11, height: 9)
+            let levelRect = NSRect(x: inset.minX, y: inset.minY,
+                                   width: max(1.5, inset.width * fraction), height: inset.height)
+            overlay(in: levelRect, shell: shell) { knockout in
+                (knockout ? NSColor.black : NSColor.labelColor).setFill()
+                plugPath(in: plugRect).fill()
             }
         }
 
@@ -206,15 +221,26 @@ enum MenuBarIcon {
     }
 
     private static func textOnly(snapshot: BatterySnapshot, colored: Bool) -> NSImage {
-        let text = "\(snapshot.percentage)%" + (snapshot.isPluggedIn ? "" : "")
+        let text = "\(snapshot.percentage)%"
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         let color = fillColor(for: snapshot.percentage, charging: snapshot.isCharging, colored: colored)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let size = text.size(withAttributes: attributes)
+        // After the figure, a bolt while charging, or a plug while plugged in but not
+        // charging, as the other styles show inside the battery.
+        let charging = snapshot.isCharging
+        let held = !charging && snapshot.chargeHold != nil
+        let glyphSpace: CGFloat = held ? 13 : (charging ? 9 : 0)
 
-        let image = NSImage(size: NSSize(width: ceil(size.width) + 2, height: height))
+        let image = NSImage(size: NSSize(width: ceil(size.width) + 2 + glyphSpace, height: height))
         image.lockFocus()
         text.draw(at: NSPoint(x: 1, y: (height - size.height) / 2), withAttributes: attributes)
+        (colored ? color : NSColor.labelColor).setFill()
+        if charging {
+            boltPath(in: NSRect(x: ceil(size.width) + 3, y: height / 2 - 5.5, width: 7, height: 11)).fill()
+        } else if held {
+            plugPath(in: NSRect(x: ceil(size.width) + 3, y: height / 2 - 4.5, width: 11, height: 9)).fill()
+        }
         image.unlockFocus()
         image.isTemplate = !colored
         return image
@@ -249,6 +275,9 @@ enum MenuBarIcon {
         if snapshot.isCharging {
             NSColor.labelColor.setFill()
             boltPath(in: NSRect(x: center.x - 2.2, y: center.y - 4, width: 4.4, height: 8)).fill()
+        } else if snapshot.chargeHold != nil {
+            NSColor.labelColor.setFill()
+            plugPath(in: NSRect(x: center.x - 4.5, y: center.y - 3.5, width: 9, height: 7)).fill()
         } else {
             let text = "\(snapshot.percentage)"
             // Three digits need a smaller face to clear the ring.
@@ -262,5 +291,22 @@ enum MenuBarIcon {
         image.unlockFocus()
         image.isTemplate = !colored
         return image
+    }
+
+    /// The plug shown while plugged in but not charging, where the bolt goes while
+    /// charging: a cord, a body and two prongs, pointing right. Drawn as a path like the
+    /// bolt, so it stays crisp on a 1x display and takes the same colour and punch-out.
+    private static func plugPath(in rect: NSRect) -> NSBezierPath {
+        let x = rect.minX, w = rect.width, h = rect.height, mid = rect.midY
+        let path = NSBezierPath()
+        let cord = max(1.2, h * 0.18)
+        path.appendRect(NSRect(x: x, y: mid - cord / 2, width: w * 0.32, height: cord))
+        let body = NSRect(x: x + w * 0.28, y: mid - h * 0.4, width: w * 0.42, height: h * 0.8)
+        path.appendRoundedRect(body, xRadius: h * 0.14, yRadius: h * 0.14)
+        let prong = max(1.1, h * 0.16)
+        for offset in [-h * 0.21, h * 0.21] {
+            path.appendRect(NSRect(x: x + w * 0.68, y: mid + offset - prong / 2, width: w * 0.32, height: prong))
+        }
+        return path
     }
 }

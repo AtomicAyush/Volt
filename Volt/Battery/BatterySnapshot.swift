@@ -35,6 +35,10 @@ struct BatterySnapshot: Equatable {
     var batteryPower: Double?
     /// Devices charging from this Mac's own ports, such as AirPods plugged into it.
     var portOutputs: [PortOutput] = []
+    /// The battery's `ChargerData.NotChargingReason` bits.
+    var notChargingReason: Int?
+    /// Why the Mac is plugged in but not charging; nil when it is charging or on battery.
+    var chargeHold: ChargeHold?
 
     /// "Normal", "Service Recommended", ... as reported by macOS.
     var condition: String?
@@ -89,6 +93,7 @@ struct BatterySnapshot: Equatable {
 
     /// "3h 40min until empty" / "42min until full", for the alert subtitle.
     var untilText: String {
+        if let chargeHold { return chargeHold == .full ? "Fully charged" : chargeHold.short }
         guard let m = minutesRemaining, m > 0 else {
             if isFullyCharged && isPluggedIn { return "Fully charged" }
             return isPluggedIn ? "Estimating time to full" : "Estimating time remaining"
@@ -99,6 +104,7 @@ struct BatterySnapshot: Equatable {
     }
 
     var timeRemainingText: String {
+        if let chargeHold { return chargeHold == .full ? "Fully charged" : "Not charging · \(chargeHold.short)" }
         guard let m = minutesRemaining, m > 0 else {
             if isFullyCharged && isPluggedIn { return "Fully charged" }
             return isPluggedIn ? "Calculating…" : "Calculating…"
