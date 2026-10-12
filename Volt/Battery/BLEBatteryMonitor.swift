@@ -68,6 +68,23 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
 
     /// Model numbers of devices actually paired to this Mac, supplied by DeviceMonitor.
     var pairedModels: Set<UInt16> = []
+    /// Names of the devices paired to this Mac, as `DeviceMonitor.nameKey`s, supplied by
+    /// DeviceMonitor once its first scan is in; nil until then.
+    var pairedNames: Set<String>?
+
+    /// Devices that refused to give their battery this session. Reading it from a device
+    /// that is not paired to this Mac makes macOS ask the user to pair, so such a device
+    /// is not connected to again until Volt restarts or tracking is turned off and on.
+    private var refused: Set<UUID> = []
+
+    /// Names of devices Volt is connected to but has had no battery from, and has never
+    /// had one from: they prove nothing about being paired.
+    var unansweredNames: Set<String> {
+        Set(peripherals.values
+            .filter { levels[$0.identifier] == nil && !knownIdentifiers.contains($0.identifier) }
+            .compactMap { ($0.name ?? lastKnownNames[$0.identifier]).map(DeviceMonitor.nameKey) })
+    }
+
     /// The last three bytes of each paired device's address, supplied by DeviceMonitor:
     /// part of the signature that marks a broadcast as this Mac's own AirPods'.
     var pairedAddressTails: Set<UInt32> = []
@@ -110,6 +127,8 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         peripherals.removeAll()
         levels.removeAll()
         batteries = []
+        // Turning tracking off and on is the way to give a refused device another try.
+        refused.removeAll()
         // So the next start() builds a new manager, which scans again as soon as it is
         // powered on, and a new timer; `start()` does nothing while one exists.
         central = nil
@@ -152,7 +171,9 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
         for peripheral in central.retrieveConnectedPeripherals(withServices: [Self.batteryService]) {
             // This path had no filter, and it is how a pair of headphones nobody was
             // using ended up connected to and listed.
-            guard qualifies(peripheral) == true else { continue }
+            guard qualifies(peripheral) == true,
+                  knownIdentifiers.contains(peripheral.identifier) || isOwn(peripheral.name)
+            else { continue }
             adopt(peripheral)
         }
 
@@ -227,20 +248,50 @@ final class BLEBatteryMonitor: NSObject, ObservableObject {
                            remembered: lastKnownNames[peripheral.identifier])
     }
 
+    /// A device found by scanning is connected to only if its name is exactly that of an
+    /// iPhone or iPad paired to this Mac. A name that merely contains "iPad" is not
+    /// enough: a classmate's iPad matched that, and reading its battery made macOS ask
+    /// to pair with it every twenty seconds — on both machines.
     private func isCandidate(_ peripheral: CBPeripheral, advertisement: [String: Any]) -> Bool {
-        Self.isWanted((advertisement[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name)
+        let name = (advertisement[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
+        if knownIdentifiers.contains(peripheral.identifier) { return Self.isWanted(name) }
+        return Self.isWanted(name) && isOwn(name)
+    }
+
+    /// True for the name of a device paired to this Mac. Nothing counts until the first
+    /// scan of paired devices is in.
+    private func isOwn(_ name: String?) -> Bool {
+        guard let name, !name.isEmpty, let pairedNames else { return false }
+        return pairedNames.contains(DeviceMonitor.nameKey(name))
+    }
+
+    /// Stops trying a device that would not give its battery, for the rest of the session.
+    /// One that has answered before only loses that standing the first time — it may be
+    /// one the user has since unpaired — and is refused if it fails again.
+    private func refuse(_ peripheral: CBPeripheral) {
+        if knownIdentifiers.contains(peripheral.identifier) {
+            forget(peripheral.identifier)
+            return
+        }
+        refused.insert(peripheral.identifier)
+        peripherals.removeValue(forKey: peripheral.identifier)
+        central?.cancelPeripheralConnection(peripheral)
     }
 
     private func adopt(_ peripheral: CBPeripheral) {
+        guard !refused.contains(peripheral.identifier) else { return }
         if peripherals[peripheral.identifier] == nil {
             peripherals[peripheral.identifier] = peripheral
             peripheral.delegate = self
         }
-        if peripheral.state != .connected {
+        switch peripheral.state {
+        case .connected:
+            if peripheral.services == nil { peripheral.discoverServices(Self.services) }
+        case .connecting:
+            break   // a request is already waiting for the device
+        default:
             // Without a timeout this request simply waits until the device is reachable.
             central?.connect(peripheral, options: nil)
-        } else if peripheral.services == nil {
-            peripheral.discoverServices(Self.services)
         }
     }
 
@@ -395,11 +446,35 @@ extension BLEBatteryMonitor: CBCentralManagerDelegate {
         }
     }
 
+    /// A read refused for want of pairing, or pairing turned down. An encryption timeout
+    /// is left out: the user's own iPad has given one right after launch and then
+    /// answered half a minute later.
+    private static func isPairingRefusal(_ error: Error?) -> Bool {
+        if let error = error as? CBATTError {
+            return [.insufficientAuthentication, .insufficientEncryption,
+                    .insufficientEncryptionKeySize, .insufficientAuthorization].contains(error.code)
+        }
+        if let error = error as? CBError {
+            return error.code == .peerRemovedPairingInformation
+        }
+        return false
+    }
+
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
         levels[peripheral.identifier]?.isStale = true
         publish()
 
+        // A device that has never answered and refused pairing, or that is not one of this
+        // Mac's own and dropped the link without a reading, is not tried again. One of
+        // the user's own devices dropping out is just the link being flaky.
+        let name = peripheral.name ?? lastKnownNames[peripheral.identifier]
+        if Self.isPairingRefusal(error)
+            || (!knownIdentifiers.contains(peripheral.identifier)
+                && levels[peripheral.identifier] == nil && !isOwn(name)) {
+            refuse(peripheral)
+            return
+        }
         if knownIdentifiers.contains(peripheral.identifier) {
             // Ask for it back; the request waits until the device returns.
             central.connect(peripheral, options: nil)
@@ -435,6 +510,10 @@ extension BLEBatteryMonitor: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if Self.isPairingRefusal(error) {
+            refuse(peripheral)
+            return
+        }
         guard error == nil,
               characteristic.uuid == Self.batteryLevel,
               let data = characteristic.value,

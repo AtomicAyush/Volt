@@ -224,13 +224,26 @@ final class DeviceMonitor: ObservableObject {
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
+        let unansweredBefore = BLEBatteryMonitor.shared.unansweredNames
         queue.async {
-            let found = Self.scanBluetooth() + Self.scanAppleHID()
+            let bluetooth = Self.scanBluetooth()
+            let found = (bluetooth ?? []) + Self.scanAppleHID()
             DispatchQueue.main.async {
                 // Tell the decoder which models are paired to this Mac, and their
                 // addresses, which a broadcast from this Mac's own AirPods carries.
                 BLEBatteryMonitor.shared.pairedModels = Set(found.compactMap(\.model))
                 BLEBatteryMonitor.shared.pairedAddressTails = Set(found.compactMap { Self.addressTail($0.id) })
+                // And their names: an iPhone or iPad is connected to only if it is one of them.
+                // The report lists whatever holds a link, so a device Volt itself is
+                // connected to but has had no answer from proves nothing, unless the
+                // report also lists it as an offline paired device. A failed scan leaves
+                // the last good list in place.
+                if let bluetooth {
+                    let unproven = unansweredBefore.union(BLEBatteryMonitor.shared.unansweredNames)
+                    let offline = Set(bluetooth.filter { !$0.isConnected }.map { Self.nameKey($0.name) })
+                    BLEBatteryMonitor.shared.pairedNames = Set(found.map { Self.nameKey($0.name) })
+                        .subtracting(unproven.subtracting(offline))
+                }
                 // Which device each address belongs to, including a second listing that
                 // loses to the first in deduplication.
                 self.scanOwners = Dictionary(found.map { (BluetoothFrameworkBattery.normalise($0.id), Self.nameKey($0.name)) },
@@ -594,13 +607,14 @@ final class DeviceMonitor: ObservableObject {
 
     // MARK: - Sources
 
-    private static func scanBluetooth() -> [DeviceBattery] {
+    /// nil when system_profiler failed, as opposed to finding nothing.
+    private static func scanBluetooth() -> [DeviceBattery]? {
         guard let json = Shell.run("/usr/sbin/system_profiler",
                                    ["SPBluetoothDataType", "-json"], timeout: 25),
               let data = json.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sections = root["SPBluetoothDataType"] as? [[String: Any]]
-        else { return [] }
+        else { return nil }
 
         var result: [DeviceBattery] = []
         for section in sections {
