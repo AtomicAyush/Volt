@@ -1,5 +1,35 @@
 # Volt
 
+<p>
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-SwiftUI%20%C2%B7%20AppKit-F05138?logo=swift&logoColor=white">
+  <img alt="Hardware" src="https://img.shields.io/badge/Hardware-SMC%20%C2%B7%20Bluetooth%20LE-0A84FF">
+</p>
+
+> **A battery menu bar app for macOS: configurable low-battery alerts, battery health, accessory batteries, and per-app energy use.**
+
+<img src="docs/panel.png" alt="Volt panel" width="420">
+
+### Highlights
+- **Reads the hardware directly:** live current and voltage straight from the System Management Controller, instead of the IO registry, which only republishes every 8+ seconds.
+- **Accessory batteries without cables:** iPhone and iPad levels over the Bluetooth LE Battery Service; AirPods levels decoded byte by byte from Continuity broadcasts, matched only to this Mac's own devices.
+- **Privileged helper** (ServiceManagement) for toggling Low Power Mode safely.
+- **Edge-triggered alerts** at any level, each with its own sound and color, plus per-app CPU and energy use.
+- **~7.4k lines of Swift** · IOKit · CoreBluetooth · IOBluetooth
+
+```mermaid
+flowchart LR
+  SMC[SMC: current, voltage] --> M[Battery model]
+  IOR[IO registry: health, cycles, temp] --> M
+  BLE[BLE GATT battery service] --> A[Accessories]
+  CB[Continuity broadcasts] --> A
+  M --> UI[Menu bar icon + panels]
+  A --> UI
+  M --> AL[Alert engine]
+```
+
+---
+
 A battery menu bar app for macOS. Custom low-battery alerts at any level you choose,
 battery health and lifecycle tracking, accessory batteries, and per-app energy and CPU use.
 
